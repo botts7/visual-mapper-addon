@@ -18,6 +18,14 @@ else
     export LOG_LEVEL="info"
 fi
 
+# IMPORTANT: Use persistent storage directory (survives add-on updates/rebuilds)
+# /config is mapped from Home Assistant and persists across container rebuilds
+export DATA_DIR="/config/visual_mapper"
+mkdir -p "$DATA_DIR"
+mkdir -p "$DATA_DIR/flows"
+mkdir -p "$DATA_DIR/sensors"
+echo "Using persistent data directory: $DATA_DIR"
+
 echo "Starting Visual Mapper..."
 echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 
