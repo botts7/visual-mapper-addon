@@ -17,8 +17,12 @@ WORKDIR /app
 # Copy add-on requirements first (minimal, no opencv)
 COPY requirements.txt /tmp/requirements-addon.txt
 
-# Clone the main Visual Mapper repository
-RUN git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper
+# Cache bust: changing this value forces fresh git clone
+ARG CACHEBUST=0.0.54
+
+# Clone the main Visual Mapper repository (fresh copy)
+RUN echo "Cloning version: $CACHEBUST" && \
+    git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper
 
 # Copy application files from cloned repo
 RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
