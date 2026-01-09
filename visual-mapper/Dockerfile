@@ -13,7 +13,7 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 # Clone the main Visual Mapper repository
-RUN git clone --depth 1 https://github.com/botts7/visual-mapper.git /tmp/visual-mapper
+RUN git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper
 
 # Copy application files from cloned repo
 RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
