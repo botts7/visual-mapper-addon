@@ -12,6 +12,9 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
+# Copy add-on requirements first (minimal, no opencv)
+COPY requirements.txt /tmp/requirements-addon.txt
+
 # Clone the main Visual Mapper repository
 RUN git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper
 
@@ -21,8 +24,8 @@ RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
     cp -r /tmp/visual-mapper/config /app/ && \
     rm -rf /tmp/visual-mapper
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
+# Use add-on requirements (not the full requirements from repo)
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-addon.txt
 
 # Copy run script
 COPY run.sh /
