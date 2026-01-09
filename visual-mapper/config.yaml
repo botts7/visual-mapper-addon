@@ -1,64 +1,33 @@
-# Home Assistant Add-on Configuration
-# https://developers.home-assistant.io/docs/add-ons/configuration
-
 name: Visual Mapper
-version: 0.0.53
+version: "0.0.53"
 slug: visual_mapper
 description: Android device control and sensor creation for Home Assistant via ADB
 url: https://github.com/botts7/visual-mapper
-
-# Supported architectures
 arch:
   - aarch64
   - amd64
-
-# Startup configuration
-init: false
 startup: application
-boot: auto
-
-# Host network access required for ADB connections
 host_network: true
-
-# Ports
 ports:
   8080/tcp: 8080
-
 ports_description:
   8080/tcp: Web UI
-
-# WebUI configuration
-webui: http://[HOST]:[PORT:8080]
-panel_icon: mdi:android
-panel_title: Visual Mapper
 ingress: true
 ingress_port: 8080
-
-# Add-on options
+panel_icon: mdi:android
+panel_title: Visual Mapper
 options:
-  mqtt_broker: "core-mosquitto"
+  mqtt_broker: core-mosquitto
   mqtt_port: 1883
   mqtt_username: ""
   mqtt_password: ""
-  mqtt_discovery_prefix: "homeassistant"
   log_level: info
-
-# Options schema
 schema:
   mqtt_broker: str
   mqtt_port: port
   mqtt_username: str?
   mqtt_password: password?
-  mqtt_discovery_prefix: str
   log_level: list(debug|info|warning|error)
-
-# Map directories
 map:
   - config:rw
-  - ssl:ro
-
-# USB access for ADB
 usb: true
-
-# ADB requires privileged access
-privileged: true
