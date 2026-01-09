@@ -1,10 +1,8 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=python:3.11-alpine
 FROM $BUILD_FROM
 
 # Install system dependencies
 RUN apk add --no-cache \
-    python3 \
-    py3-pip \
     git \
     android-tools \
     wget \
@@ -26,18 +24,15 @@ RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
     cp -r /tmp/visual-mapper/config /app/ && \
     rm -rf /tmp/visual-mapper
 
-# Use add-on requirements (not the full requirements from repo)
-RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-addon.txt
-
-# Setup s6-overlay v3 service
-RUN mkdir -p /etc/s6-overlay/s6-rc.d/visual-mapper && \
-    mkdir -p /etc/s6-overlay/s6-rc.d/user/contents.d && \
-    echo "longrun" > /etc/s6-overlay/s6-rc.d/visual-mapper/type && \
-    touch /etc/s6-overlay/s6-rc.d/user/contents.d/visual-mapper
+# Install Python dependencies
+RUN pip install --no-cache-dir -r /tmp/requirements-addon.txt
 
 # Copy run script
-COPY run.sh /etc/s6-overlay/s6-rc.d/visual-mapper/run
-RUN chmod a+x /etc/s6-overlay/s6-rc.d/visual-mapper/run
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
 
 # Expose port
 EXPOSE 8080
+
+ENTRYPOINT []
+CMD [ "/run.sh" ]
