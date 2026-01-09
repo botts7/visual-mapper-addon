@@ -29,11 +29,15 @@ RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
 # Use add-on requirements (not the full requirements from repo)
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-addon.txt
 
+# Setup s6-overlay v3 service
+RUN mkdir -p /etc/s6-overlay/s6-rc.d/visual-mapper && \
+    mkdir -p /etc/s6-overlay/s6-rc.d/user/contents.d && \
+    echo "longrun" > /etc/s6-overlay/s6-rc.d/visual-mapper/type && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/visual-mapper
+
 # Copy run script
-COPY run.sh /run.sh
-RUN chmod a+x /run.sh
+COPY run.sh /etc/s6-overlay/s6-rc.d/visual-mapper/run
+RUN chmod a+x /etc/s6-overlay/s6-rc.d/visual-mapper/run
 
 # Expose port
 EXPOSE 8080
-
-CMD [ "/run.sh" ]
