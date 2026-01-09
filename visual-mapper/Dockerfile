@@ -1,8 +1,10 @@
-ARG BUILD_FROM=python:3.11-alpine
+ARG BUILD_FROM
 FROM $BUILD_FROM
 
 # Install system dependencies
 RUN apk add --no-cache \
+    python3 \
+    py3-pip \
     git \
     android-tools \
     wget \
@@ -25,14 +27,13 @@ RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
     rm -rf /tmp/visual-mapper
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r /tmp/requirements-addon.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-addon.txt
 
-# Copy run script
+# Copy run script to root
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
 # Expose port
 EXPOSE 8080
 
-ENTRYPOINT []
 CMD [ "/run.sh" ]
