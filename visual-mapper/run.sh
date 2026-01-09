@@ -12,5 +12,5 @@ bashio::log.info "Starting Visual Mapper..."
 bashio::log.info "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 
 # Start the server
-cd /app/backend
+cd /app
 exec python3 main.py

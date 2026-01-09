@@ -5,20 +5,24 @@ FROM $BUILD_FROM
 RUN apk add --no-cache \
     python3 \
     py3-pip \
+    git \
     android-tools \
     wget
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+# Clone the main Visual Mapper repository
+RUN git clone --depth 1 https://github.com/botts7/visual-mapper.git /tmp/visual-mapper
 
-# Copy application files
-COPY backend/ ./backend/
-COPY frontend/ ./frontend/
-COPY config/ ./config/
+# Copy application files from cloned repo
+RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
+    cp -r /tmp/visual-mapper/frontend /app/ && \
+    cp -r /tmp/visual-mapper/config /app/ && \
+    rm -rf /tmp/visual-mapper
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
 
 # Copy run script
 COPY run.sh /
