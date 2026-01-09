@@ -7,7 +7,9 @@ RUN apk add --no-cache \
     py3-pip \
     git \
     android-tools \
-    wget
+    wget \
+    jq \
+    bash
 
 # Set working directory
 WORKDIR /app
@@ -27,10 +29,11 @@ RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
 # Use add-on requirements (not the full requirements from repo)
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-addon.txt
 
-# Copy run script to s6-overlay services directory
-COPY run.sh /etc/services.d/visual-mapper/run
-COPY finish.sh /etc/services.d/visual-mapper/finish
-RUN chmod a+x /etc/services.d/visual-mapper/run /etc/services.d/visual-mapper/finish
+# Copy run script
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
 
 # Expose port
 EXPOSE 8080
+
+CMD [ "/run.sh" ]

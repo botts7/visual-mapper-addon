@@ -1,15 +1,17 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/bash
+set -e
 
-# Read configuration from Home Assistant
-export MQTT_BROKER=$(bashio::config 'mqtt_broker')
-export MQTT_PORT=$(bashio::config 'mqtt_port')
-export MQTT_USERNAME=$(bashio::config 'mqtt_username')
-export MQTT_PASSWORD=$(bashio::config 'mqtt_password')
-export MQTT_DISCOVERY_PREFIX=$(bashio::config 'mqtt_discovery_prefix')
-export LOG_LEVEL=$(bashio::config 'log_level')
+CONFIG_PATH=/data/options.json
 
-bashio::log.info "Starting Visual Mapper..."
-bashio::log.info "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
+# Read configuration from Home Assistant options
+export MQTT_BROKER=$(jq -r '.mqtt_broker' $CONFIG_PATH)
+export MQTT_PORT=$(jq -r '.mqtt_port' $CONFIG_PATH)
+export MQTT_USERNAME=$(jq -r '.mqtt_username' $CONFIG_PATH)
+export MQTT_PASSWORD=$(jq -r '.mqtt_password' $CONFIG_PATH)
+export LOG_LEVEL=$(jq -r '.log_level' $CONFIG_PATH)
+
+echo "Starting Visual Mapper..."
+echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 
 # Start the server
 cd /app
