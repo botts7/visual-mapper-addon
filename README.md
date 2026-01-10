@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Home Assistant](https://img.shields.io/badge/home%20assistant-add--on-41BDF5.svg)](https://www.home-assistant.io/)
+[![Sponsor](https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa.svg?logo=github)](https://github.com/sponsors/botts7)
 
 Android device control and sensor creation for Home Assistant.
 
