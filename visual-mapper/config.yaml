@@ -1,5 +1,5 @@
 name: Visual Mapper
-version: "0.0.66"
+version: "0.0.67"
 slug: visual_mapper
 description: Android device control and sensor creation for Home Assistant via ADB
 url: https://github.com/botts7/visual-mapper
@@ -14,6 +14,7 @@ ports:
 ports_description:
   8080/tcp: Web UI
 ingress: false
+webui: http://[HOST]:[PORT:8080]
 panel_icon: mdi:android
 panel_title: Visual Mapper
 options:
