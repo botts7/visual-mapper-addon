@@ -22,10 +22,11 @@ COPY version.txt /tmp/version.txt
 
 # Clone the main Visual Mapper repository (fresh copy every build)
 # Note: Repo must be public for this to work without authentication
+# GIT_TERMINAL_PROMPT=0 ensures no interactive prompts in CI
 RUN VERSION=$(cat /tmp/version.txt) && \
     echo "Building Visual Mapper version: $VERSION" && \
     rm -rf /tmp/visual-mapper && \
-    git clone --depth 1 https://github.com/botts7/visual-mapper.git /tmp/visual-mapper
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/botts7/visual-mapper.git /tmp/visual-mapper
 
 # Copy application files from cloned repo
 RUN cp -r /tmp/visual-mapper/backend/* /app/ && \

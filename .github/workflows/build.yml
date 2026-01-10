@@ -62,13 +62,12 @@ jobs:
           file: ./visual-mapper/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
+          no-cache: true
           build-args: |
             BUILD_FROM=${{ matrix.build_from }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:${{ steps.version.outputs.version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   # update-config job disabled during testing
   # Re-enable when ready to go public with ghcr.io images
