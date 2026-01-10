@@ -70,34 +70,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  update-config:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Get version
-        id: version
-        run: |
-          VERSION=$(grep 'version:' visual-mapper/config.yaml | sed 's/version: *"\(.*\)"/\1/')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Update config.yaml with image reference
-        run: |
-          # Check if image key exists, if not add it
-          if ! grep -q '^image:' visual-mapper/config.yaml; then
-            # Add image key after version line
-            sed -i '/^version:/a image: ghcr.io/${{ github.repository_owner }}/visual-mapper-{arch}' visual-mapper/config.yaml
-          fi
-
-      - name: Commit changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add visual-mapper/config.yaml
-          git diff --staged --quiet || git commit -m "chore: Update image reference for v${{ steps.version.outputs.version }}"
-          git push || true
+  # update-config job disabled during testing
+  # Re-enable when ready to go public with ghcr.io images
