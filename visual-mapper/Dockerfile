@@ -27,6 +27,7 @@ RUN rm -rf /tmp/visual-mapper && \
 RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
     cp -r /tmp/visual-mapper/frontend /app/ && \
     cp -r /tmp/visual-mapper/config /app/ && \
+    cp /tmp/visual-mapper/.build-version /app/ && \
     rm -rf /tmp/visual-mapper
 
 # Install Python dependencies
