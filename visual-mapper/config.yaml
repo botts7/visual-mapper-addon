@@ -5,8 +5,8 @@ image: ghcr.io/botts7/visual-mapper-{arch}
 description: Android device control and sensor creation for Home Assistant via ADB
 url: https://github.com/botts7/visual-mapper
 arch:
-  - aarch64
   - amd64
+  - aarch64
 init: false
 startup: application
 host_network: true

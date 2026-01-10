@@ -20,8 +20,9 @@ jobs:
       packages: write
 
     strategy:
+      fail-fast: false
       matrix:
-        arch: [amd64, aarch64, armv7, armhf, i386]
+        arch: [amd64, aarch64]
         include:
           - arch: amd64
             build_from: ghcr.io/home-assistant/amd64-base:3.18
@@ -29,15 +30,6 @@ jobs:
           - arch: aarch64
             build_from: ghcr.io/home-assistant/aarch64-base:3.18
             platform: linux/arm64
-          - arch: armv7
-            build_from: ghcr.io/home-assistant/armv7-base:3.18
-            platform: linux/arm/v7
-          - arch: armhf
-            build_from: ghcr.io/home-assistant/armhf-base:3.18
-            platform: linux/arm/v6
-          - arch: i386
-            build_from: ghcr.io/home-assistant/i386-base:3.18
-            platform: linux/386
 
     steps:
       - name: Checkout repository
