@@ -17,12 +17,11 @@ WORKDIR /app
 # Copy add-on requirements first (minimal, no opencv)
 COPY requirements.txt /tmp/requirements-addon.txt
 
-# Cache bust: changing this value forces fresh git clone
-ARG CACHEBUST=0.0.89
-
-# Clone the main Visual Mapper repository (fresh copy)
-RUN echo "Cloning version: $CACHEBUST" && \
-    git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper
+# Clone the main Visual Mapper repository (fresh copy every build)
+# Version 0.0.89 - Samsung lock fix
+RUN rm -rf /tmp/visual-mapper && \
+    git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper && \
+    echo "Cloned at $(date)"
 
 # Copy application files from cloned repo
 RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
