@@ -1,5 +1,5 @@
 name: Visual Mapper
-version: "0.1.11"
+version: "0.1.12"
 slug: visual_mapper
 # image: ghcr.io/botts7/visual-mapper-{arch}  # Enable after testing
 description: Android device control and sensor creation for Home Assistant via ADB
