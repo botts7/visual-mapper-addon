@@ -24,12 +24,24 @@ options:
   mqtt_username: ""
   mqtt_password: ""
   log_level: info
+  ml_training_mode: disabled
+  ml_remote_host: ""
+  ml_remote_port: 8099
+  ml_use_dqn: false
+  ml_batch_size: 64
+  ml_save_interval: 60
 schema:
   mqtt_broker: str
   mqtt_port: port
   mqtt_username: str?
   mqtt_password: password?
   log_level: list(debug|info|warning|error)
+  ml_training_mode: list(disabled|local|remote)
+  ml_remote_host: str?
+  ml_remote_port: port?
+  ml_use_dqn: bool
+  ml_batch_size: int(16,256)
+  ml_save_interval: int(10,300)
 map:
   - config:rw
 usb: true
