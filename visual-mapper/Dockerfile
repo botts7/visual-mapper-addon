@@ -18,7 +18,7 @@ WORKDIR /app
 COPY requirements.txt /tmp/requirements-addon.txt
 
 # Cache bust: changing this value forces fresh git clone
-ARG CACHEBUST=0.0.88
+ARG CACHEBUST=0.0.89
 
 # Clone the main Visual Mapper repository (fresh copy)
 RUN echo "Cloning version: $CACHEBUST" && \
