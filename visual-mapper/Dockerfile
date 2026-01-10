@@ -17,11 +17,14 @@ WORKDIR /app
 # Copy add-on requirements first (minimal, no opencv)
 COPY requirements.txt /tmp/requirements-addon.txt
 
+# CACHE BUSTER: Copy version file - when this changes, all subsequent layers are rebuilt
+COPY version.txt /tmp/version.txt
+
 # Clone the main Visual Mapper repository (fresh copy every build)
-# Version 0.0.91 - Universal multi-device unlock
-RUN rm -rf /tmp/visual-mapper && \
-    git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper && \
-    echo "Cloned at $(date)"
+RUN VERSION=$(cat /tmp/version.txt) && \
+    echo "Building Visual Mapper version: $VERSION" && \
+    rm -rf /tmp/visual-mapper && \
+    git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper
 
 # Copy application files from cloned repo
 RUN cp -r /tmp/visual-mapper/backend/* /app/ && \
