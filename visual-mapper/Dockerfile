@@ -18,7 +18,7 @@ WORKDIR /app
 COPY requirements.txt /tmp/requirements-addon.txt
 
 # Clone the main Visual Mapper repository (fresh copy every build)
-# Version 0.0.90 - Wake screen before unlock
+# Version 0.0.91 - Universal multi-device unlock
 RUN rm -rf /tmp/visual-mapper && \
     git clone --depth 1 https://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@github.com/botts7/visual-mapper.git /tmp/visual-mapper && \
     echo "Cloned at $(date)"
