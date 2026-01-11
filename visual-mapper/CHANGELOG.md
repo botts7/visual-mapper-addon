@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.30
+
+- Add missing hover-highlight CSS for smart suggestions
+- Fix smart suggestions hover-to-highlight on screenshot
+- Update module import versions for cache busting
+
 ## 0.2.28
 
 - Fix app icons not loading while in flow wizard (wizard was blocking icon fetch)
