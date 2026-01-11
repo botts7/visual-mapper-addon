@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.23
+
+- Hover over suggestion to highlight element on screenshot
+- Add edit button for capture_sensors steps in flow review
+- Click to edit linked sensor directly from flow step
+
 ## 0.2.22
 
 - Add multiple name suggestions for smart sensors
