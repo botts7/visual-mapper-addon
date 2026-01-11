@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.21
+
+- Fix false navigation warnings for splash→main screen transitions
+- Auto-prefetch app icons and names on device connection
+- Improved flow wizard splash screen detection
+
+## 0.2.20
+
+- Remove Coral TPU from addon (Alpine/musl incompatible with libedgetpu)
+- Document Coral limitation (requires Debian-based standalone deployment)
+
 ## 0.2.19
 
 - Fix navbar text wrapping (white-space: nowrap)
