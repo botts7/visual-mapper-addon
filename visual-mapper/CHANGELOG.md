@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.16
+
+- Add Coral Edge TPU support to Docker container
+- Install libedgetpu runtime and pycoral in Dockerfile
+- Add libusb and udev for USB device support
+
 ## 0.2.14
 
 - Add MQTT username/password arguments to ML server
