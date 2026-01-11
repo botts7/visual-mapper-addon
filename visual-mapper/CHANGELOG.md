@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.34
+
+- Fix Play Store icon/name fetching (blocking sync calls in async context)
+- Wrap google_play_scraper calls with asyncio.to_thread() to prevent event loop blocking
+- Icons and app names now fetch correctly in background workers
+
 ## 0.2.31
 
 - Update ALL JS module imports for complete cache bust
