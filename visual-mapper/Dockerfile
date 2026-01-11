@@ -9,7 +9,24 @@ RUN apk add --no-cache \
     android-tools \
     wget \
     jq \
-    bash
+    bash \
+    libusb \
+    udev
+
+# Install Edge TPU runtime (for Coral USB/M.2/PCIe)
+# Download and install libedgetpu for Alpine/musl
+RUN mkdir -p /tmp/edgetpu && \
+    cd /tmp/edgetpu && \
+    wget -q https://github.com/google-coral/libedgetpu/releases/download/release-grouper/edgetpu_runtime_20221024.zip && \
+    unzip -q edgetpu_runtime_20221024.zip && \
+    cp edgetpu_runtime/libedgetpu/throttled/k8/libedgetpu.so.1 /usr/lib/ && \
+    ln -s /usr/lib/libedgetpu.so.1 /usr/lib/libedgetpu.so && \
+    rm -rf /tmp/edgetpu
+
+# Install pycoral and tflite-runtime
+RUN pip3 install --no-cache-dir --break-system-packages \
+    tflite-runtime \
+    pycoral || echo "Coral packages not available for this platform - Coral TPU will be disabled"
 
 # Set working directory
 WORKDIR /app
