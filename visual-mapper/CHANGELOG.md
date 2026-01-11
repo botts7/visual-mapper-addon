@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.22
+
+- Add multiple name suggestions for smart sensors
+- Show "Also try" alternatives when auto-detected name is wrong
+- Click alternative to swap names (above/below/left sources shown)
+
 ## 0.2.21
 
 - Fix false navigation warnings for splash→main screen transitions
