@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.24
+
+- Fix Learn Navigation duplicate screens issue (hash mismatch)
+- Fix Set Home Screen button not working (API parameter issue)
+- Skip splash screens when auto-setting home screen
+- Improve feedback during learn mode (pause/resume status)
+
 ## 0.2.23
 
 - Hover over suggestion to highlight element on screenshot
