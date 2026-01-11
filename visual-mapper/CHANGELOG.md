@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.35
+
+- MAJOR: Embed code directly in addon repo (no more git clone during build)
+- Fixes deployment caching issues - what you push is what gets deployed
+- Fix Play Store icon/name fetching (asyncio.to_thread() for blocking calls)
+- Smart Suggestions: "Also try" alternatives and hover highlight working
+
 ## 0.2.34
 
 - Fix Play Store icon/name fetching (blocking sync calls in async context)

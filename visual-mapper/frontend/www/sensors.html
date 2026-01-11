@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.2.34" data-build="2026-01-01">
+    <title>Sensors - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/styles.css?v=0.2.34">
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.2.34"></script>
+
+    <div class="container">
+        <div class="card">
+            <h1>Sensor Management</h1>
+            <p>Manage Home Assistant sensors created from Android UI elements</p>
+        </div>
+
+        <div class="card">
+            <h2>All Sensors</h2>
+
+            <div style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                <select id="deviceFilter" style="flex: 1; min-width: 180px; max-width: 320px;">
+                    <option value="">All Devices</option>
+                </select>
+                <select id="appFilter" style="flex: 1; min-width: 180px; max-width: 320px;">
+                    <option value="">All Apps</option>
+                </select>
+                <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap;">
+                    <input type="checkbox" id="notInFlowFilter">
+                    Not in flow
+                </label>
+                <input type="text" id="sensorSearch" placeholder="Search sensors..." style="flex: 1; min-width: 200px; max-width: 400px;">
+                <button id="refreshBtn">Refresh</button>
+            </div>
+
+            <!-- Disconnected device alert (hidden by default) -->
+            <div id="disconnectedAlert" style="display: none; background: #ff980020; border: 1px solid #FF9800; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                <div style="display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;">
+                    <span style="font-size: 24px;">⚠️</span>
+                    <div style="flex: 1;">
+                        <strong style="color: #FF9800;">Device Disconnected</strong>
+                        <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 14px;">
+                            Sensors are shown from the database, but values may be stale. Connect the device via ADB to update sensor values.
+                        </p>
+                        <div id="disconnectedDevicesList" style="margin-top: 10px;"></div>
+                    </div>
+                    <a href="devices.html" class="btn" style="background: #FF9800; color: white; padding: 8px 16px; white-space: nowrap;">
+                        Manage Devices
+                    </a>
+                </div>
+            </div>
+
+            <div id="sensorsContainer">
+                <p class="status warning">Loading sensors...</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import APIClient from './js/modules/api-client.js?v=0.0.5';
+        // Note: ThemeToggle and MobileNav now handled by js/components/navbar.js
+        import SensorCreator from './js/modules/sensor-creator.js?v=0.0.10';
+        import IconRenderer from './js/modules/icon-renderer.js?v=0.0.5';
+
+        const apiClient = new APIClient();
+        const sensorCreator = new SensorCreator(apiClient);
+        const iconRenderer = new IconRenderer();
+
+        let allSensors = [];
+        let deviceSensors = new Map(); // deviceId -> sensors[]
+        let deviceInfo = new Map(); // deviceId -> device info (model, activity, etc.)
+        let sensorsInFlows = new Set(); // sensor_ids that are referenced in flows
+        let stableIdsWithFlows = new Set();
+        let deviceIdsWithFlows = new Set(); // stable_device_ids that have at least one flow
+        let allFlows = []; // all flows across all devices
+
+        // Extract app package from sensor (from target_app or element_resource_id)
+        function extractAppFromSensor(sensor) {
+            // First try target_app
+            if (sensor.target_app) {
+                return sensor.target_app;
+            }
+            // Fallback: extract from element_resource_id (format: "com.package.name:id/element_id")
+            if (sensor.source?.element_resource_id) {
+                const resourceId = sensor.source.element_resource_id;
+                if (resourceId.includes(':')) {
+                    return resourceId.split(':')[0];
+                }
+            }
+            return null;
+        }
+
+        // Get friendly app name from package
+        function getAppDisplayName(appPackage) {
+            if (!appPackage) return null;
+            const parts = appPackage.split('.');
+            if (parts.length >= 2) {
+                // Return last meaningful part, capitalized
+                return parts[parts.length - 1].charAt(0).toUpperCase() + parts[parts.length - 1].slice(1);
+            }
+            return parts[parts.length - 1];
+        }
+
+        // Load all sensors and flows
+        async function loadSensors() {
+            try {
+                // Get all devices
+                const devicesResponse = await apiClient.get('/adb/devices');
+                const devices = devicesResponse.devices || [];
+
+                // Store device info for later use
+                deviceInfo.clear();
+                devices.forEach(dev => deviceInfo.set(dev.id, dev));
+
+                // Load sensors per device AND all flows in parallel
+                allSensors = [];
+                deviceSensors.clear();
+                sensorsInFlows.clear();
+                stableIdsWithFlows.clear();
+                deviceIdsWithFlows.clear();
+                allFlows = [];
+
+                // ALWAYS fetch all sensors (works even when devices disconnected)
+                const allSensorsPromise = apiClient.get('/sensors')
+                    .then(response => Array.isArray(response) ? response : (response.sensors || []))
+                    .catch(error => {
+                        console.error('[Sensors] Failed to load all sensors:', error);
+                        return [];
+                    });
+
+                // Also fetch per-device if devices are connected (for grouping)
+                const sensorPromises = devices.map(device =>
+                    apiClient.get(`/sensors/${device.id}`)
+                        .then(response => ({type: 'sensors', device, data: response.sensors || []}))
+                        .catch(error => {
+                            console.error(`[Sensors] Failed to load sensors for ${device.id}:`, error);
+                            return {type: 'sensors', device, data: []};
+                        })
+                );
+
+                // Load ALL flows (not filtered by device) to match by stable_device_id
+                // Note: API returns direct array, not {flows: [...]}
+                const flowsPromise = apiClient.get('/flows')
+                    .then(response => Array.isArray(response) ? response : (response.flows || []))
+                    .catch(error => {
+                        console.error('[Sensors] Failed to load flows:', error);
+                        return [];
+                    });
+
+                // Wait for all API calls
+                const [allSensorsData, sensorResults, flowsData] = await Promise.all([
+                    allSensorsPromise,
+                    Promise.all(sensorPromises),
+                    flowsPromise
+                ]);
+
+                // Use all sensors as the base (works even when device disconnected)
+                allSensors = allSensorsData;
+
+                // Group sensors by device_id for the dropdown
+                for (const sensor of allSensors) {
+                    const deviceId = sensor.device_id;
+                    if (!deviceSensors.has(deviceId)) {
+                        deviceSensors.set(deviceId, []);
+                    }
+                    deviceSensors.get(deviceId).push(sensor);
+                }
+
+                // Also add device info from sensors if device not in connected list
+                // Need to check if stable device ID maps to a connected device via identity map
+                for (const sensor of allSensors) {
+                    if (!deviceInfo.has(sensor.device_id)) {
+                        // Check if this stable device ID has a current_connection that's connected
+                        const identityInfo = deviceIdentityMap[sensor.device_id];
+                        let isConnected = false;
+                        let model = sensor.device_id;
+
+                        if (identityInfo) {
+                            // Check if current_connection is in connected devices
+                            if (identityInfo.current_connection && deviceInfo.has(identityInfo.current_connection)) {
+                                isConnected = true;
+                                model = identityInfo.model || model;
+                            } else {
+                                model = identityInfo.model || model;
+                            }
+                        }
+
+                        // Create device info entry
+                        deviceInfo.set(sensor.device_id, {
+                            id: sensor.device_id,
+                            model: model,
+                            connected: isConnected
+                        });
+                    }
+                }
+
+                // Process flows - extract sensor_ids AND stable_device_ids
+                allFlows = flowsData;
+                flowsData.forEach(flow => {
+                    // Track stable_device_id for device-level flow detection
+                    if (flow.stable_device_id) {
+                        stableIdsWithFlows.add(flow.stable_device_id);
+                    }
+                    if (flow.device_id) {
+                        deviceIdsWithFlows.add(flow.device_id);
+                    }
+                    // Extract sensor_ids from flow steps
+                    if (flow.steps) {
+                        flow.steps.forEach(step => {
+                            if (step.step_type === 'capture_sensors' && step.sensor_ids) {
+                                step.sensor_ids.forEach(id => sensorsInFlows.add(id));
+                            }
+                        });
+                    }
+                });
+
+                updateDeviceFilter();
+                updateAppFilter();
+                renderSensors();
+
+            } catch (error) {
+                console.error('[Sensors] Failed to load sensors:', error);
+                document.getElementById('sensorsContainer').innerHTML =
+                    '<p class="status error">Failed to load sensors</p>';
+            }
+        }
+
+        // Check if any devices are disconnected
+        function hasDisconnectedDevices() {
+            for (const [deviceId, device] of deviceInfo.entries()) {
+                if (device.connected === false) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Store device identity info for reconnection
+        let deviceIdentityMap = {};
+
+        // Load device identity info for reconnection
+        async function loadDeviceIdentities() {
+            try {
+                const response = await apiClient.get('/adb/known-devices');
+                const devices = response.devices || [];
+                deviceIdentityMap = {};
+                devices.forEach(device => {
+                    deviceIdentityMap[device.stable_device_id] = device;
+                });
+            } catch (error) {
+                console.warn('[Sensors] Could not load device identities:', error);
+            }
+        }
+
+        // Reconnect a device
+        window.reconnectDevice = async function(connectionId) {
+            const ipMatch = connectionId.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)$/);
+            if (!ipMatch) {
+                alert('Cannot auto-reconnect. Please go to Devices page to connect manually.');
+                return;
+            }
+
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Connecting...';
+
+            try {
+                await apiClient.post('/adb/connect', { host: ipMatch[1], port: parseInt(ipMatch[2]) });
+                btn.textContent = 'Connected!';
+                btn.style.background = '#4CAF50';
+                // Reload sensors after successful reconnection
+                setTimeout(() => loadSensors(), 500);
+            } catch (error) {
+                btn.textContent = 'Failed';
+                btn.style.background = '#f44336';
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                }, 2000);
+            }
+        };
+
+        // Update disconnected alert visibility
+        async function updateDisconnectedAlert() {
+            const alert = document.getElementById('disconnectedAlert');
+            const disconnectedList = document.getElementById('disconnectedDevicesList');
+            const deviceFilter = document.getElementById('deviceFilter').value;
+
+            // Get disconnected devices
+            const disconnectedDevices = [];
+            if (deviceFilter) {
+                // Viewing specific device
+                const device = deviceInfo.get(deviceFilter);
+                if (device?.connected === false) {
+                    disconnectedDevices.push({ id: deviceFilter, ...device });
+                }
+            } else {
+                // Viewing all devices
+                for (const [deviceId, device] of deviceInfo.entries()) {
+                    if (device.connected === false) {
+                        disconnectedDevices.push({ id: deviceId, ...device });
+                    }
+                }
+            }
+
+            if (disconnectedDevices.length === 0) {
+                alert.style.display = 'none';
+                return;
+            }
+
+            alert.style.display = 'block';
+
+            // Build list of disconnected devices with reconnect buttons
+            let html = '';
+            for (const device of disconnectedDevices) {
+                const identityInfo = deviceIdentityMap[device.id] || {};
+                const lastConnection = identityInfo.current_connection || null;
+                const hasReconnectable = lastConnection && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$/.test(lastConnection);
+
+                html += `
+                    <div style="display: inline-flex; align-items: center; gap: 8px; margin: 4px 8px 4px 0; padding: 4px 8px; background: var(--background-color); border-radius: 4px;">
+                        <span style="font-size: 13px;"><strong>${device.model || device.id}</strong></span>
+                        ${hasReconnectable ? `
+                            <button onclick="window.reconnectDevice('${lastConnection}')" class="btn btn-sm" style="padding: 2px 8px; font-size: 11px; background: #4CAF50;">
+                                Reconnect
+                            </button>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            disconnectedList.innerHTML = html;
+        }
+
+        // Update device filter dropdown
+        function updateDeviceFilter() {
+            const deviceFilter = document.getElementById('deviceFilter');
+            const currentValue = deviceFilter.value;
+
+            // Keep "All Devices" option
+            const connectedCount = Array.from(deviceInfo.values()).filter(d => d.connected !== false).length;
+            const disconnectedCount = Array.from(deviceInfo.values()).filter(d => d.connected === false).length;
+
+            let allDevicesLabel = 'All Devices';
+            if (disconnectedCount > 0) {
+                allDevicesLabel = `All Devices (${connectedCount} online, ${disconnectedCount} offline)`;
+            }
+            deviceFilter.innerHTML = `<option value="">${allDevicesLabel}</option>`;
+
+            // Add option for each device that has sensors
+            for (const [deviceId, sensors] of deviceSensors.entries()) {
+                const option = document.createElement('option');
+                option.value = deviceId;
+
+                // Get device info for model name
+                const device = deviceInfo.get(deviceId);
+                const model = device?.model || deviceId;
+                const isConnected = device?.connected !== false;
+                const statusIcon = isConnected ? '🟢' : '🔴';
+
+                option.textContent = `${statusIcon} ${model} (${sensors.length} sensor${sensors.length !== 1 ? 's' : ''})`;
+                deviceFilter.appendChild(option);
+            }
+
+            // Restore selection if possible
+            if (currentValue && deviceSensors.has(currentValue)) {
+                deviceFilter.value = currentValue;
+            }
+
+            // Update alert visibility
+            updateDisconnectedAlert();
+        }
+
+        function updateAppFilter() {
+            const appFilter = document.getElementById('appFilter');
+            const currentValue = appFilter.value;
+            const appCounts = new Map();
+
+            for (const sensor of allSensors) {
+                const appPackage = extractAppFromSensor(sensor) || '__unknown__';
+                appCounts.set(appPackage, (appCounts.get(appPackage) || 0) + 1);
+            }
+
+            appFilter.innerHTML = '<option value="">All Apps</option>';
+            const sorted = Array.from(appCounts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+            for (const [appPackage, count] of sorted) {
+                const option = document.createElement('option');
+                option.value = appPackage;
+                const label = appPackage === '__unknown__' ? 'Unknown' : (getAppDisplayName(appPackage) || appPackage);
+                option.textContent = `${label} (${count})`;
+                appFilter.appendChild(option);
+            }
+
+            if (currentValue && Array.from(appFilter.options).some(opt => opt.value === currentValue)) {
+                appFilter.value = currentValue;
+            }
+        }
+
+        // Render sensors list
+        function renderSensors() {
+            const container = document.getElementById('sensorsContainer');
+            const deviceFilter = document.getElementById('deviceFilter').value;
+            const appFilter = document.getElementById('appFilter').value;
+            const notInFlowOnly = document.getElementById('notInFlowFilter').checked;
+            const searchTerm = document.getElementById('sensorSearch').value.toLowerCase();
+
+            // Filter sensors
+            let filteredSensors = allSensors;
+
+            if (deviceFilter) {
+                filteredSensors = filteredSensors.filter(s => s.device_id === deviceFilter);
+            }
+
+            if (appFilter) {
+                filteredSensors = filteredSensors.filter(s => (extractAppFromSensor(s) || '__unknown__') === appFilter);
+            }
+
+            if (notInFlowOnly) {
+                filteredSensors = filteredSensors.filter(s => !sensorsInFlows.has(s.sensor_id));
+            }
+
+            if (searchTerm) {
+                filteredSensors = filteredSensors.filter(s =>
+                    s.friendly_name.toLowerCase().includes(searchTerm) ||
+                    s.sensor_id.toLowerCase().includes(searchTerm) ||
+                    s.device_class.toLowerCase().includes(searchTerm)
+                );
+            }
+
+            if (filteredSensors.length === 0) {
+                container.innerHTML = '<p class="status warning">No sensors found</p>';
+                return;
+            }
+
+            // Group by device + app combination
+            const groupedByDeviceApp = new Map();
+            for (const sensor of filteredSensors) {
+                const appPackage = extractAppFromSensor(sensor);
+                const groupKey = `${sensor.device_id}|${appPackage || 'unknown'}`;
+                if (!groupedByDeviceApp.has(groupKey)) {
+                    groupedByDeviceApp.set(groupKey, {
+                        deviceId: sensor.device_id,
+                        appPackage: appPackage,
+                        sensors: []
+                    });
+                }
+                groupedByDeviceApp.get(groupKey).sensors.push(sensor);
+            }
+
+            // Update disconnected alert based on current filter
+            updateDisconnectedAlert();
+
+            // Render grouped sensors
+            let html = '';
+            for (const [groupKey, group] of groupedByDeviceApp.entries()) {
+                const device = deviceInfo.get(group.deviceId);
+                const deviceModel = device?.model || group.deviceId;
+                const isConnected = device?.connected !== false;
+                const connectionBadge = isConnected
+                    ? '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px;">Online</span>'
+                    : '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px;">Offline</span>';
+                const appName = getAppDisplayName(group.appPackage);
+                const appLabel = appName ? `<span style="background: #673AB7; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">${appName}</span>` : '';
+
+                html += `
+                    <div class="card" style="margin-bottom: 15px; ${!isConnected ? 'border-left: 3px solid #f44336;' : ''}">
+                        <h3 style="margin-bottom: 10px; color: var(--primary-color); display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <span>${deviceModel}</span>
+                            ${connectionBadge}
+                            ${appLabel}
+                            <span style="font-size: 14px; font-weight: normal; color: var(--text-secondary);">
+                                (${group.sensors.length} sensor${group.sensors.length !== 1 ? 's' : ''})
+                            </span>
+                        </h3>
+                        ${group.appPackage ? `<p style="margin: -5px 0 10px 0; font-size: 12px; color: var(--text-secondary);">${group.appPackage}</p>` : ''}
+                        ${group.sensors.map(sensor => renderSensorCard(sensor, isConnected)).join('')}
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        // Format relative time
+        function formatRelativeTime(timestamp) {
+            if (!timestamp) return 'Never';
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffSec = Math.floor(diffMs / 1000);
+            const diffMin = Math.floor(diffSec / 60);
+            const diffHr = Math.floor(diffMin / 60);
+            const diffDay = Math.floor(diffHr / 24);
+
+            if (diffSec < 10) return 'Just now';
+            if (diffSec < 60) return `${diffSec}s ago`;
+            if (diffMin < 60) return `${diffMin}m ago`;
+            if (diffHr < 24) return `${diffHr}h ago`;
+            return `${diffDay}d ago`;
+        }
+
+        // Render individual sensor card
+        function renderSensorCard(sensor, isDeviceConnected = true) {
+            const isInFlow = sensorsInFlows.has(sensor.sensor_id);
+            // Check if device has any flows by stable_device_id
+            const hasDeviceFlow = (sensor.stable_device_id && stableIdsWithFlows.has(sensor.stable_device_id)) || (sensor.device_id && deviceIdsWithFlows.has(sensor.device_id));
+            const isOrphaned = !isInFlow && !hasDeviceFlow;
+
+            // Extract app info for display
+            const appPackage = extractAppFromSensor(sensor);
+            const appName = getAppDisplayName(appPackage);
+
+            const enabledBadge = sensor.enabled
+                ? '<span style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">Enabled</span>'
+                : '<span style="background: #757575; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">Disabled</span>';
+
+            // Flow badge: In Flow (blue) > Device Has Flow (yellow) > No Flow (red)
+            let flowBadge;
+            if (isInFlow) {
+                flowBadge = '<span style="background: #2196F3; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">In Flow</span>';
+            } else if (hasDeviceFlow) {
+                flowBadge = '<span style="background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">Not in Flow</span>';
+            } else {
+                flowBadge = '<span style="background: #f44336; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">No Flow</span>';
+            }
+
+            const typeBadge = sensor.sensor_type === 'binary_sensor'
+                ? '<span style="background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">Binary</span>'
+                : '<span style="background: #2196F3; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">Sensor</span>';
+
+            const deviceClassBadge = sensor.device_class && sensor.device_class !== 'none'
+                ? `<span style="background: #673AB7; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">${sensor.device_class}</span>`
+                : '';
+
+            // App badge - shows which app this sensor is tied to
+            const appBadge = appName
+                ? `<span style="background: #009688; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;" title="${appPackage}">${appName}</span>`
+                : '<span style="background: #9E9E9E; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px;">No App</span>';
+
+            const currentValue = sensor.current_value
+                ? `${sensor.current_value}${sensor.unit_of_measurement || ''}`
+                : '--';
+
+            const lastUpdated = formatRelativeTime(sensor.last_updated);
+
+            // Warning for orphaned sensors (no flow at all for this device)
+            const orphanWarning = isOrphaned ? `
+                <div style="background: #f4433620; border: 1px solid #f44336; border-radius: 6px; padding: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div style="color: #f44336;">
+                        <strong>No Flow</strong> - No flows exist for this device. Create one to capture sensor values.
+                    </div>
+                    <a href="flow-wizard.html?device=${encodeURIComponent(sensor.device_id)}&sensor=${encodeURIComponent(sensor.sensor_id)}"
+                       class="btn" style="background: #4CAF50; padding: 6px 12px; font-size: 13px; white-space: nowrap;">
+                        Create Flow
+                    </a>
+                </div>
+            ` : '';
+
+            // Info for sensors with device flow but not added to it
+            const notInFlowInfo = (!isInFlow && hasDeviceFlow) ? `
+                <div style="background: #FF980020; border: 1px solid #FF9800; border-radius: 6px; padding: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div style="color: #FF9800;">
+                        <strong>Not in Flow</strong> - Device has flows, but this sensor is not captured. Add it to an existing flow.
+                    </div>
+                    <a href="flows.html?device=${encodeURIComponent(sensor.device_id)}"
+                       class="btn" style="background: #FF9800; color: white; padding: 6px 12px; font-size: 13px; white-space: nowrap;">
+                        View Flows
+                    </a>
+                </div>
+            ` : '';
+
+            return `
+                <div style="border: 1px solid ${isOrphaned ? '#f44336' : (hasDeviceFlow && !isInFlow) ? '#FF9800' : 'var(--border-color)'}; padding: 15px; margin-bottom: 10px; border-radius: 6px; background: var(--card-background);">
+                    ${orphanWarning}
+                    ${notInFlowInfo}
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                        <div style="flex: 1; min-width: 200px;">
+                            <h4 style="margin: 0 0 8px 0; color: var(--text-color);">
+                                ${sensor.icon ? iconRenderer.render(sensor.icon, {size: '1.3em', style: 'margin-right: 8px;'}) : ''}
+                                ${sensor.friendly_name}
+                            </h4>
+                            <div style="display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px;">
+                                ${enabledBadge}
+                                ${flowBadge}
+                                ${typeBadge}
+                                ${deviceClassBadge}
+                                ${appBadge}
+                            </div>
+                            <p style="margin: 5px 0; font-size: 13px; color: var(--text-secondary);">
+                                <strong>ID:</strong> ${sensor.sensor_id}<br>
+                                <strong>Update Interval:</strong> ${sensor.update_interval_seconds}s<br>
+                                <strong>Extraction Method:</strong> ${sensor.extraction_rule.method}
+                            </p>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 5px;">
+                            <button onclick="window.testSensor('${sensor.device_id}', '${sensor.sensor_id}')"
+                                    style="padding: 6px 12px; font-size: 13px; background: ${isDeviceConnected ? 'var(--secondary-color)' : '#9E9E9E'}; ${!isDeviceConnected ? 'cursor: not-allowed; opacity: 0.6;' : ''}"
+                                    ${!isDeviceConnected ? 'disabled title="Device must be connected to test sensor"' : ''}>
+                                ${isDeviceConnected ? 'Test' : 'Test (Offline)'}
+                            </button>
+                            <button onclick="window.editSensor('${sensor.device_id}', '${sensor.sensor_id}')" style="padding: 6px 12px; font-size: 13px;">Edit</button>
+                            <button onclick="window.toggleSensor('${sensor.device_id}', '${sensor.sensor_id}', ${!sensor.enabled})" style="padding: 6px 12px; font-size: 13px; background: ${sensor.enabled ? '#757575' : '#4CAF50'};">
+                                ${sensor.enabled ? 'Disable' : 'Enable'}
+                            </button>
+                            <button onclick="window.deleteSensor('${sensor.device_id}', '${sensor.sensor_id}')" style="padding: 6px 12px; font-size: 13px; background: #f44336;">Delete</button>
+                        </div>
+                    </div>
+                    <div style="background: var(--preview-background); padding: 10px; border-radius: 4px; border: 1px solid var(--preview-border); display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="font-size: 13px; color: var(--text-secondary);">Current Value:</span>
+                            <strong style="font-size: 1.2em; margin-left: 8px; color: var(--primary-color);">${currentValue}</strong>
+                        </div>
+                        <div style="text-align: right; font-size: 12px; color: var(--text-secondary);">
+                            Last Updated<br>
+                            <strong>${lastUpdated}</strong>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Delete sensor
+        window.deleteSensor = async function(deviceId, sensorId) {
+            if (!confirm(`Delete sensor "${sensorId}"?\n\nThis action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                // URL encode device_id (contains : which can cause issues)
+                await apiClient.delete(`/sensors/${encodeURIComponent(deviceId)}/${encodeURIComponent(sensorId)}`);
+                console.log(`[Sensors] Deleted sensor ${sensorId}`);
+                await loadSensors();
+            } catch (error) {
+                console.error(`[Sensors] Failed to delete sensor:`, error);
+                alert(`Failed to delete sensor: ${error.message}`);
+            }
+        };
+
+        // Toggle sensor enabled/disabled
+        window.toggleSensor = async function(deviceId, sensorId, enable) {
+            try {
+                // Get current sensor (URL encode to handle : in device_id)
+                const response = await apiClient.get(`/sensors/${encodeURIComponent(deviceId)}/${encodeURIComponent(sensorId)}`);
+                const sensor = response.sensor;
+
+                // Update enabled flag
+                sensor.enabled = enable;
+
+                // Save
+                await apiClient.put('/sensors', sensor);
+                console.log(`[Sensors] ${enable ? 'Enabled' : 'Disabled'} sensor ${sensorId}`);
+                await loadSensors();
+            } catch (error) {
+                console.error(`[Sensors] Failed to toggle sensor:`, error);
+                alert(`Failed to ${enable ? 'enable' : 'disable'} sensor: ${error.message}`);
+            }
+        };
+
+        // Test sensor extraction - Call backend API to verify extraction still works
+        window.testSensor = async function(deviceId, sensorId) {
+            try {
+                // Get sensor details (URL encode to handle : in device_id)
+                const response = await apiClient.get(`/sensors/${encodeURIComponent(deviceId)}/${encodeURIComponent(sensorId)}`);
+                const sensor = response.sensor;
+
+                // Test extraction with current element text
+                const testResponse = await apiClient.post('/test/extract', {
+                    text: sensor.source.element_text,
+                    extraction_rule: sensor.extraction_rule
+                });
+
+                if (testResponse.success) {
+                    alert(`✅ Test Extraction Successful!\n\nSensor: ${sensor.friendly_name}\nOriginal Text: "${sensor.source.element_text}"\nExtracted Value: "${testResponse.extracted_value}"\n\nExtraction is working correctly!`);
+                } else {
+                    alert(`❌ Test Extraction Failed!\n\nSensor: ${sensor.friendly_name}\nError: ${testResponse.error || 'Unknown error'}\n\nYou may need to edit the sensor's extraction rules.`);
+                }
+            } catch (error) {
+                console.error(`[Sensors] Failed to test sensor:`, error);
+                alert(`Failed to test sensor: ${error.message}`);
+            }
+        };
+
+        // Edit sensor - Open sensor creator in edit mode
+        window.editSensor = async function(deviceId, sensorId) {
+            try {
+                // Get sensor details (URL encode to handle : in device_id)
+                const response = await apiClient.get(`/sensors/${encodeURIComponent(deviceId)}/${encodeURIComponent(sensorId)}`);
+                const sensor = response.sensor;
+
+                // Open sensor creator in edit mode
+                await sensorCreator.showEdit(sensor);
+            } catch (error) {
+                console.error(`[Sensors] Failed to load sensor for editing:`, error);
+                alert(`Failed to load sensor: ${error.message}`);
+            }
+        };
+
+        // Event listeners
+        document.getElementById('deviceFilter').addEventListener('change', renderSensors);
+        document.getElementById('appFilter').addEventListener('change', renderSensors);
+        document.getElementById('notInFlowFilter').addEventListener('change', renderSensors);
+        document.getElementById('sensorSearch').addEventListener('input', renderSensors);
+        document.getElementById('refreshBtn').addEventListener('click', loadSensors);
+
+        // Initial load
+        loadDeviceIdentities().then(() => loadSensors());
+    </script>
+</body>
+</html>

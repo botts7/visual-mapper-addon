@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.2.34" data-build="2026-01-10">
+    <title>Dashboard - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/styles.css?v=0.2.34">
+    <style>
+        /* Dashboard-specific styles */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .stat-card .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin: 0;
+        }
+
+        .stat-card .stat-label {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin: 5px 0 0 0;
+        }
+
+        .stat-card .stat-icon {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+
+        .stat-card.success { border-left: 4px solid #4CAF50; }
+        .stat-card.warning { border-left: 4px solid #FF9800; }
+        .stat-card.info { border-left: 4px solid #2196F3; }
+        .stat-card.primary { border-left: 4px solid var(--primary-color); }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        .status-indicator.online {
+            background: #4CAF5020;
+            color: #4CAF50;
+        }
+
+        .status-indicator.offline {
+            background: #f4433620;
+            color: #f44336;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.online { background: #4CAF50; }
+        .status-dot.offline { background: #f44336; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+            flex-shrink: 0;
+        }
+
+        .activity-icon.sensor { background: #2196F320; color: #2196F3; }
+        .activity-icon.device { background: #4CAF5020; color: #4CAF50; }
+        .activity-icon.action { background: #FF980020; color: #FF9800; }
+        .activity-icon.flow { background: #9C27B020; color: #9C27B0; }
+
+        .activity-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .activity-title {
+            font-weight: 500;
+            color: var(--text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .activity-meta {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+        }
+
+        .activity-time {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .sensor-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+            gap: 10px;
+        }
+
+        .sensor-row:last-child {
+            border-bottom: none;
+        }
+
+        .sensor-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .sensor-name {
+            font-weight: 500;
+            color: var(--text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .sensor-device {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+
+        .sensor-value {
+            font-weight: 600;
+            color: var(--primary-color);
+            white-space: nowrap;
+        }
+
+        .sensor-updated {
+            font-size: 0.75em;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .header-row h2 {
+            margin: 0;
+        }
+
+        .refresh-time {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.2.34"></script>
+
+    <div class="container">
+        <!-- Header with logo and status -->
+        <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <img src="branding/logo-horizontal.svg" alt="Visual Mapper" style="height: 40px;">
+            </div>
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div id="mqttStatus" class="status-indicator offline">
+                    <span class="status-dot offline"></span>
+                    <span>MQTT: Checking...</span>
+                </div>
+                <div id="backendStatus" class="status-indicator offline">
+                    <span class="status-dot offline"></span>
+                    <span>Backend: Checking...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Disconnected Device Alert -->
+        <div id="disconnectedAlert" style="display: none; background: #ff980020; border: 1px solid #FF9800; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+            <div style="display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;">
+                <span style="font-size: 24px;">⚠️</span>
+                <div style="flex: 1;">
+                    <strong style="color: #FF9800;">Devices Disconnected</strong>
+                    <p style="margin: 5px 0 0 0; color: var(--text-secondary); font-size: 14px;" id="disconnectedMessage">
+                        Some devices are offline. Sensors and flows for these devices will not update.
+                    </p>
+                    <div id="disconnectedDevicesList" style="margin-top: 10px;"></div>
+                </div>
+                <a href="devices.html" class="btn" style="background: #FF9800; color: white; padding: 8px 16px; white-space: nowrap;">
+                    Manage Devices
+                </a>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card success">
+                <div class="stat-icon">📱</div>
+                <p class="stat-value" id="deviceCount">-</p>
+                <p class="stat-label">Devices</p>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-icon">📊</div>
+                <p class="stat-value" id="sensorCount">-</p>
+                <p class="stat-label">Sensors</p>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-icon">⚡</div>
+                <p class="stat-value" id="actionCount">-</p>
+                <p class="stat-label">Actions</p>
+            </div>
+            <div class="stat-card primary">
+                <div class="stat-icon">🔄</div>
+                <p class="stat-value" id="flowCount">-</p>
+                <p class="stat-label">Flows</p>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Grid -->
+        <div class="dashboard-grid">
+            <!-- Connected Devices -->
+            <div class="card">
+                <div class="header-row">
+                    <h2>Connected Devices</h2>
+                    <a href="devices.html" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.85em;">Manage</a>
+                </div>
+                <div id="devicesContainer">
+                    <p class="status warning">Loading devices...</p>
+                </div>
+            </div>
+
+            <!-- Active Sensors -->
+            <div class="card">
+                <div class="header-row">
+                    <h2>Active Sensors</h2>
+                    <a href="sensors.html" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.85em;">View All</a>
+                </div>
+                <div id="sensorsContainer">
+                    <p class="status warning">Loading sensors...</p>
+                </div>
+            </div>
+
+            <!-- Recent Actions -->
+            <div class="card">
+                <div class="header-row">
+                    <h2>Recent Actions</h2>
+                    <a href="actions.html" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.85em;">View All</a>
+                </div>
+                <div id="actionsContainer">
+                    <p class="status warning">Loading actions...</p>
+                </div>
+            </div>
+
+            <!-- Active Flows -->
+            <div class="card">
+                <div class="header-row">
+                    <h2>Active Flows</h2>
+                    <a href="flows.html" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.85em;">View All</a>
+                </div>
+                <div id="flowsContainer">
+                    <p class="status warning">Loading flows...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer with refresh time -->
+        <div style="text-align: center; margin-top: 20px; color: var(--text-secondary); font-size: 0.85em;">
+            <span id="lastRefresh">Last updated: --</span>
+            <button id="refreshAll" class="btn btn-secondary" style="margin-left: 10px; padding: 5px 15px; font-size: 0.85em;">Refresh Now</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import APIClient from './js/modules/api-client.js?v=0.0.5';
+        import IconRenderer from './js/modules/icon-renderer.js?v=0.0.5';
+        // Note: ThemeToggle and MobileNav now handled by js/components/navbar.js
+
+        const apiClient = new APIClient();
+        const iconRenderer = new IconRenderer();
+
+        // Format relative time
+        function formatRelativeTime(timestamp) {
+            if (!timestamp) return 'Never';
+            // Backend returns UTC timestamps without 'Z' suffix - add it so JS parses correctly
+            const utcTimestamp = timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
+            const date = new Date(utcTimestamp);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffSec = Math.floor(diffMs / 1000);
+            const diffMin = Math.floor(diffSec / 60);
+            const diffHr = Math.floor(diffMin / 60);
+            const diffDay = Math.floor(diffHr / 24);
+
+            if (diffSec < 10) return 'Just now';
+            if (diffSec < 60) return `${diffSec}s ago`;
+            if (diffMin < 60) return `${diffMin}m ago`;
+            if (diffHr < 24) return `${diffHr}h ago`;
+            return `${diffDay}d ago`;
+        }
+
+        // Track connected device IDs
+        const connectedDeviceIds = new Set();
+        let disconnectedDeviceCount = 0;
+        let deviceIdentityMap = {}; // For reconnection info
+
+        // Load device identity info for reconnection
+        async function loadDeviceIdentities() {
+            try {
+                const response = await apiClient.get('/adb/known-devices');
+                const devices = response.devices || [];
+                deviceIdentityMap = {};
+                devices.forEach(device => {
+                    deviceIdentityMap[device.stable_device_id] = device;
+                });
+            } catch (error) {
+                console.warn('[Dashboard] Could not load device identities:', error);
+            }
+        }
+
+        // Reconnect a device
+        window.reconnectDevice = async function(connectionId) {
+            const ipMatch = connectionId.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)$/);
+            if (!ipMatch) {
+                alert('Cannot auto-reconnect. Please go to Devices page to connect manually.');
+                return;
+            }
+
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Connecting...';
+
+            try {
+                await apiClient.post('/adb/connect', { host: ipMatch[1], port: parseInt(ipMatch[2]) });
+                btn.textContent = 'Connected!';
+                btn.style.background = '#4CAF50';
+                // Reload dashboard after successful reconnection
+                setTimeout(() => location.reload(), 500);
+            } catch (error) {
+                btn.textContent = 'Failed';
+                btn.style.background = '#f44336';
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                }, 2000);
+            }
+        };
+
+        // Check for disconnected devices (devices with saved data but not connected)
+        async function checkDisconnectedDevices() {
+            try {
+                // Get all sensors and flows to find device IDs with saved data
+                const [sensorsData, flowsData] = await Promise.all([
+                    apiClient.get('/sensors').catch(() => []),
+                    apiClient.get('/flows').catch(() => [])
+                ]);
+
+                const sensors = Array.isArray(sensorsData) ? sensorsData : [];
+                const flows = Array.isArray(flowsData) ? flowsData : [];
+
+                // Collect unique device IDs from saved data
+                const savedDeviceIds = new Set();
+                sensors.forEach(s => s.device_id && savedDeviceIds.add(s.device_id));
+                flows.forEach(f => f.device_id && savedDeviceIds.add(f.device_id));
+
+                // Find disconnected devices
+                // Check both: direct ID match AND via identity map (stable ID -> current_connection)
+                const disconnectedDevices = [];
+                for (const deviceId of savedDeviceIds) {
+                    // Direct match
+                    if (connectedDeviceIds.has(deviceId)) continue;
+
+                    // Check via identity map
+                    const identityInfo = deviceIdentityMap[deviceId];
+                    if (identityInfo && identityInfo.current_connection) {
+                        if (connectedDeviceIds.has(identityInfo.current_connection)) continue;
+                    }
+
+                    // Device is disconnected
+                    disconnectedDevices.push(deviceId);
+                }
+                disconnectedDeviceCount = disconnectedDevices.length;
+
+                // Update alert visibility
+                const alert = document.getElementById('disconnectedAlert');
+                const message = document.getElementById('disconnectedMessage');
+                const disconnectedList = document.getElementById('disconnectedDevicesList');
+
+                if (disconnectedDeviceCount > 0) {
+                    alert.style.display = 'block';
+                    message.textContent = `${disconnectedDeviceCount} device(s) with saved sensors/flows are offline. Connect them to resume data collection.`;
+
+                    // Build list of disconnected devices with reconnect buttons
+                    let html = '';
+                    for (const deviceId of disconnectedDevices) {
+                        const identityInfo = deviceIdentityMap[deviceId] || {};
+                        const lastConnection = identityInfo.current_connection || null;
+                        const model = identityInfo.model || deviceId;
+                        const hasReconnectable = lastConnection && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$/.test(lastConnection);
+
+                        html += `
+                            <div style="display: inline-flex; align-items: center; gap: 8px; margin: 4px 8px 4px 0; padding: 4px 8px; background: var(--background-color); border-radius: 4px;">
+                                <span style="font-size: 13px;"><strong>${model}</strong></span>
+                                ${hasReconnectable ? `
+                                    <button onclick="window.reconnectDevice('${lastConnection}')" class="btn btn-sm" style="padding: 2px 8px; font-size: 11px; background: #4CAF50;">
+                                        Reconnect
+                                    </button>
+                                ` : ''}
+                            </div>
+                        `;
+                    }
+                    disconnectedList.innerHTML = html;
+                } else {
+                    alert.style.display = 'none';
+                }
+
+            } catch (error) {
+                console.warn('[Dashboard] Could not check disconnected devices:', error);
+            }
+        }
+
+        // Check backend health and MQTT status
+        async function checkStatus() {
+            try {
+                const response = await apiClient.get('/health');
+
+                // Backend status
+                const backendEl = document.getElementById('backendStatus');
+                backendEl.className = 'status-indicator online';
+                backendEl.innerHTML = `
+                    <span class="status-dot online"></span>
+                    <span>Backend: v${response.version}</span>
+                `;
+
+                // MQTT status
+                const mqttEl = document.getElementById('mqttStatus');
+                const mqttConnected = response.mqtt_status === 'connected';
+                mqttEl.className = `status-indicator ${mqttConnected ? 'online' : 'offline'}`;
+                mqttEl.innerHTML = `
+                    <span class="status-dot ${mqttConnected ? 'online' : 'offline'}"></span>
+                    <span>MQTT: ${mqttConnected ? 'Connected' : 'Disconnected'}</span>
+                `;
+
+            } catch (error) {
+                console.error('[Dashboard] Status check failed:', error);
+                document.getElementById('backendStatus').className = 'status-indicator offline';
+                document.getElementById('backendStatus').innerHTML = `
+                    <span class="status-dot offline"></span>
+                    <span>Backend: Offline</span>
+                `;
+            }
+        }
+
+        // Load devices
+        async function loadDevices() {
+            const container = document.getElementById('devicesContainer');
+            try {
+                const response = await apiClient.get('/adb/devices');
+                const devices = response.devices || [];
+
+                // Track connected device IDs
+                connectedDeviceIds.clear();
+                devices.forEach(d => connectedDeviceIds.add(d.id));
+
+                document.getElementById('deviceCount').textContent = devices.length;
+
+                if (devices.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No devices connected</p>';
+                    return;
+                }
+
+                let html = '';
+                for (const device of devices) {
+                    const isOnline = device.state === 'device';
+                    const statusClass = isOnline ? 'online' : 'offline';
+
+                    let appName = 'No active app';
+                    if (device.current_activity && device.current_activity !== 'Unknown' && device.current_activity !== 'Offline') {
+                        const parts = device.current_activity.split('/');
+                        if (parts.length > 0) {
+                            appName = parts[0].split('.').pop() || device.current_activity;
+                        }
+                    }
+
+                    html += `
+                        <div class="activity-item">
+                            <div class="activity-icon device">📱</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${device.model || 'Unknown Device'}</div>
+                                <div class="activity-meta">${appName}</div>
+                            </div>
+                            <span class="status-indicator ${statusClass}" style="padding: 4px 10px; font-size: 0.75em;">
+                                <span class="status-dot ${statusClass}"></span>
+                                ${isOnline ? 'Online' : 'Offline'}
+                            </span>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('[Dashboard] Failed to load devices:', error);
+                container.innerHTML = '<p class="status error">Failed to load devices</p>';
+            }
+        }
+
+        // Load sensors
+        async function loadSensors() {
+            const container = document.getElementById('sensorsContainer');
+            try {
+                const devicesResponse = await apiClient.get('/adb/devices');
+                const devices = devicesResponse.devices || [];
+
+                const sensorPromises = devices.map(device =>
+                    apiClient.get(`/sensors/${device.id}`)
+                        .then(response => response.sensors || [])
+                        .catch(() => [])
+                );
+
+                const results = await Promise.all(sensorPromises);
+                let allSensors = results.flat().filter(s => s.enabled);
+
+                document.getElementById('sensorCount').textContent = allSensors.length;
+
+                if (allSensors.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No active sensors</p>';
+                    return;
+                }
+
+                // Sort by last_updated (most recent first)
+                allSensors.sort((a, b) => {
+                    const aTime = a.last_updated ? new Date(a.last_updated) : new Date(0);
+                    const bTime = b.last_updated ? new Date(b.last_updated) : new Date(0);
+                    return bTime - aTime;
+                });
+
+                let html = '';
+                for (const sensor of allSensors.slice(0, 5)) {
+                    const value = sensor.current_value
+                        ? `${sensor.current_value}${sensor.unit_of_measurement || ''}`
+                        : '--';
+                    const updated = formatRelativeTime(sensor.last_updated);
+
+                    // Render icon using IconRenderer (mdi:icon-name format)
+                    const iconHtml = sensor.icon ? iconRenderer.render(sensor.icon, { size: '1.2em' }) : '';
+
+                    // Show target_app (cleaned up) or device IP as fallback
+                    let appDisplay = '';
+                    if (sensor.target_app) {
+                        // Extract last part of package name (e.g., "com.example.app" -> "app")
+                        appDisplay = sensor.target_app.split('.').pop();
+                    } else {
+                        // Fallback to device IP without port
+                        appDisplay = sensor.device_id.split(':')[0];
+                    }
+
+                    html += `
+                        <div class="sensor-row">
+                            <div class="sensor-info">
+                                <div class="sensor-name">${iconHtml} ${sensor.friendly_name}</div>
+                                <div class="sensor-device">${appDisplay}</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div class="sensor-value">${value}</div>
+                                <div class="sensor-updated">${updated}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (allSensors.length > 5) {
+                    html += `<p style="text-align: center; padding: 10px; color: var(--text-secondary); font-size: 0.85em;">+${allSensors.length - 5} more sensors</p>`;
+                }
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('[Dashboard] Failed to load sensors:', error);
+                container.innerHTML = '<p class="status error">Failed to load sensors</p>';
+            }
+        }
+
+        // Load actions
+        async function loadActions() {
+            const container = document.getElementById('actionsContainer');
+            try {
+                const devicesResponse = await apiClient.get('/adb/devices');
+                const devices = devicesResponse.devices || [];
+
+                const actionPromises = devices.map(device =>
+                    apiClient.get(`/actions/${device.id}`)
+                        .then(response => response.actions || [])
+                        .catch(() => [])
+                );
+
+                const results = await Promise.all(actionPromises);
+                let allActions = results.flat();
+
+                document.getElementById('actionCount').textContent = allActions.length;
+
+                if (allActions.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No actions created</p>';
+                    return;
+                }
+
+                // Sort by last_executed (most recent first)
+                allActions.sort((a, b) => {
+                    const aTime = a.last_executed ? new Date(a.last_executed) : new Date(0);
+                    const bTime = b.last_executed ? new Date(b.last_executed) : new Date(0);
+                    return bTime - aTime;
+                });
+
+                let html = '';
+                for (const actionDef of allActions.slice(0, 5)) {
+                    const action = actionDef.action;
+                    const triggered = formatRelativeTime(actionDef.last_executed);
+                    const execCount = actionDef.execution_count || 0;
+
+                    html += `
+                        <div class="activity-item">
+                            <div class="activity-icon action">⚡</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${action.name}</div>
+                                <div class="activity-meta">${action.action_type} | ${execCount} runs</div>
+                            </div>
+                            <div class="activity-time">${triggered}</div>
+                        </div>
+                    `;
+                }
+
+                if (allActions.length > 5) {
+                    html += `<p style="text-align: center; padding: 10px; color: var(--text-secondary); font-size: 0.85em;">+${allActions.length - 5} more actions</p>`;
+                }
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('[Dashboard] Failed to load actions:', error);
+                container.innerHTML = '<p class="status error">Failed to load actions</p>';
+            }
+        }
+
+        // Load flows
+        async function loadFlows() {
+            const container = document.getElementById('flowsContainer');
+            try {
+                const devicesResponse = await apiClient.get('/adb/devices');
+                const devices = devicesResponse.devices || [];
+
+                // Note: API returns direct array, not {flows: [...]}
+                const flowPromises = devices.map(device =>
+                    apiClient.get(`/flows?device_id=${device.id}`)
+                        .then(response => Array.isArray(response) ? response : (response.flows || []))
+                        .catch(() => [])
+                );
+
+                const results = await Promise.all(flowPromises);
+                let allFlows = results.flat();
+
+                document.getElementById('flowCount').textContent = allFlows.length;
+
+                if (allFlows.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No flows created</p>';
+                    return;
+                }
+
+                // Sort by last_executed (most recent first)
+                allFlows.sort((a, b) => {
+                    const aTime = a.last_executed ? new Date(a.last_executed) : new Date(0);
+                    const bTime = b.last_executed ? new Date(b.last_executed) : new Date(0);
+                    return bTime - aTime;
+                });
+
+                let html = '';
+                for (const flow of allFlows.slice(0, 5)) {
+                    const lastRun = formatRelativeTime(flow.last_executed);
+                    const statusIcon = flow.last_success === true ? '✅' : (flow.last_success === false ? '❌' : '⏸️');
+                    const enabledStatus = flow.enabled ? 'Active' : 'Paused';
+
+                    html += `
+                        <div class="activity-item">
+                            <div class="activity-icon flow">🔄</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${flow.name}</div>
+                                <div class="activity-meta">${statusIcon} ${enabledStatus} | ${flow.steps?.length || 0} steps</div>
+                            </div>
+                            <div class="activity-time">${lastRun}</div>
+                        </div>
+                    `;
+                }
+
+                if (allFlows.length > 5) {
+                    html += `<p style="text-align: center; padding: 10px; color: var(--text-secondary); font-size: 0.85em;">+${allFlows.length - 5} more flows</p>`;
+                }
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('[Dashboard] Failed to load flows:', error);
+                container.innerHTML = '<p class="status error">Failed to load flows</p>';
+            }
+        }
+
+        // Refresh all data
+        async function refreshAll() {
+            await Promise.all([
+                checkStatus(),
+                loadDevices(),
+                loadSensors(),
+                loadActions(),
+                loadFlows(),
+                loadDeviceIdentities()
+            ]);
+            // Check for disconnected devices after loading connected ones and identities
+            await checkDisconnectedDevices();
+            document.getElementById('lastRefresh').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+
+        // Event listeners
+        document.getElementById('refreshAll').addEventListener('click', refreshAll);
+
+        // Initial load
+        refreshAll();
+
+        // Auto-refresh every 30 seconds
+        setInterval(refreshAll, 30000);
+    </script>
+</body>
+</html>

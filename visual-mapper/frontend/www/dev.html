@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.2.34" data-build="2026-01-09">
+    <title>Dev Tools - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/styles.css?v=0.2.34">
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+
+    <div class="container">
+        <div class="card">
+            <h1>Developer Tools</h1>
+            <p>Testing and debugging tools for development</p>
+        </div>
+
+        <div class="card">
+            <h2>Cache Busting Test</h2>
+            <p><strong>App Version:</strong> <span id="app-version"></span></p>
+            <p><strong>Meta Version:</strong> <span id="meta-version"></span></p>
+            <p><strong>API Base:</strong> <span id="api-base"></span></p>
+            <p class="mt-1 status" id="cache-status">
+                Cache busting status pending...
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>ES6 Modules Status</h2>
+            <p style="margin-bottom: 15px;">Currently loaded modules across the application (29 total):</p>
+
+            <h3 style="margin: 15px 0 10px 0; font-size: 14px; color: var(--text-secondary);">Core Modules</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>api-client.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">API communication layer</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>theme-toggle.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Dark/light theme switcher</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>mobile-nav.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Responsive navigation</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>icon-renderer.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">MDI icon rendering</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>toast.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Toast notifications</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>sanitizer.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Input sanitization</small>
+                </div>
+            </div>
+
+            <h3 style="margin: 15px 0 10px 0; font-size: 14px; color: var(--text-secondary);">Device Modules</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>device-manager.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Device connection management</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>device-control.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Touch gestures & input</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>screenshot-capture.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Device screen capture</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>live-stream.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Live streaming module</small>
+                </div>
+            </div>
+
+            <h3 style="margin: 15px 0 10px 0; font-size: 14px; color: var(--text-secondary);">Sensor & Action Modules</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>sensor-creator.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Sensor definition dialog</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>action-manager.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Action management</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>element-selector.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">UI element selection mode</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>element-tree.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Element tree component</small>
+                </div>
+            </div>
+
+            <h3 style="margin: 15px 0 10px 0; font-size: 14px; color: var(--text-secondary);">Screenshot Modules</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>overlay-filters.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Screenshot overlay controls</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>auto-refresh.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Screenshot auto-update</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>activity-monitor.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Activity tracking</small>
+                </div>
+            </div>
+
+            <h3 style="margin: 15px 0 10px 0; font-size: 14px; color: var(--text-secondary);">Flow Wizard Modules</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-wizard.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Flow wizard main controller</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-manager.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Flow CRUD operations</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-step-manager.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Flow step management</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-recorder.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Gesture recording</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-element-panel.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Element panel for flows</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-canvas-renderer.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Canvas rendering</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-interactions.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">User interaction handling</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-wizard-step1.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Step 1: Device selection</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-wizard-step2.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Step 2: App/Activity</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-wizard-step4.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Step 4: Element selection</small>
+                </div>
+                <div style="padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--preview-background);">
+                    <strong>flow-wizard-step5.js</strong> v0.0.5<br>
+                    <small style="color: var(--text-secondary);">Step 5: Review & Save</small>
+                </div>
+            </div>
+
+            <p style="margin-top: 15px; font-size: 13px; color: var(--text-secondary);">
+                All modules use dual export pattern (ES6 + global) with cache busting query parameters.
+            </p>
+        </div>
+    </div>
+
+    <script type="module" src="js/init.js?v=0.2.34"></script>
+    <!-- Note: ThemeToggle and MobileNav now handled by js/components/navbar.js -->
+    <script>
+        // Wait for init.js to load before checking versions
+        function updateVersionInfo() {
+            // Display version information
+            document.getElementById('app-version').textContent = window.APP_VERSION || 'Not set';
+
+            const metaVersion = document.querySelector('meta[name="version"]')?.content;
+            document.getElementById('meta-version').textContent = metaVersion || 'Not found';
+            document.getElementById('api-base').textContent = window.API_BASE || 'Not set';
+
+            // Verify cache busting
+            const expectedVersion = metaVersion || window.APP_VERSION;
+            const statusEl = document.getElementById('cache-status');
+            if (expectedVersion && window.APP_VERSION === expectedVersion && metaVersion === expectedVersion) {
+                statusEl.textContent = 'OK. Cache busting is working! All versions match ' + expectedVersion;
+                statusEl.className = 'mt-1 status success';
+                console.log('[Dev Tools] Cache busting verified');
+            } else {
+                statusEl.textContent = 'Cache busting mismatch! App=' + (window.APP_VERSION || 'n/a') + ' Meta=' + (metaVersion || 'n/a');
+                statusEl.className = 'mt-1 status error';
+            }
+        }
+
+        // Listen for init completion
+        window.addEventListener('visualmapper:ready', updateVersionInfo);
+
+        // Also try immediately (in case init.js already loaded)
+        if (window.APP_VERSION) {
+            updateVersionInfo();
+        }
+    </script>
+</body>
+</html>
+

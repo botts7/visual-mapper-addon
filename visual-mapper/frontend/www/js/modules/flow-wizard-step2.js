@@ -1,0 +1,549 @@
+/**
+ * Flow Wizard Step 2 - App Selection
+ * Visual Mapper v0.0.5
+ *
+ * Handles app list loading, icon detection, system app filtering, and app search
+ */
+
+import { showToast } from './toast.js?v=0.2.34';
+
+// Helper to get API base
+function getApiBase() {
+    return window.API_BASE || '/api';
+}
+
+/**
+ * Load Step 2: App Selection
+ * @param {Object} wizard - FlowWizard instance for state access
+ * @returns {Promise<void>}
+ */
+export async function loadStep(wizard) {
+    console.log('[Step2] Loading App Selection');
+    const appList = document.getElementById('appList');
+
+    if (!wizard.selectedDevice) {
+        showToast('No device selected', 'error');
+        wizard.currentStep = 1;
+        wizard.updateUI();
+        return;
+    }
+
+    try {
+        const response = await fetch(`${getApiBase()}/adb/apps/${wizard.selectedDevice}`);
+        if (!response.ok) throw new Error('Failed to fetch apps');
+
+        const data = await response.json();
+        const apps = data.apps || [];
+        console.log('[Step2] Apps loaded:', apps.length);
+
+        if (apps.length === 0) {
+            appList.innerHTML = `<div class="empty-state">No apps found on device</div>`;
+            return;
+        }
+
+        // Sort apps alphabetically by label
+        apps.sort((a, b) => {
+            const labelA = (a.label || a.package).toLowerCase();
+            const labelB = (b.label || b.package).toLowerCase();
+            return labelA.localeCompare(labelB);
+        });
+
+        // Render app grid
+        appList.className = 'app-grid';
+        const iconBase = `${getApiBase()}/adb/app-icon/${encodeURIComponent(wizard.selectedDevice)}`;
+
+        appList.innerHTML = apps.map(app => {
+            const iconUrl = `${iconBase}/${encodeURIComponent(app.package)}`;
+            const isSystem = app.is_system || false;
+            return `
+            <div class="app-item" data-package="${app.package}" data-label="${app.label || app.package}" data-is-system="${isSystem}">
+                <img class="app-icon" src="${iconUrl}"
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                     data-package="${app.package}"
+                     alt="${app.label || app.package}">
+                <div class="app-icon-fallback" style="display: none;">📱</div>
+                <div class="app-label">${app.label || app.package}</div>
+                <div class="app-package">${app.package}</div>
+                <div class="app-icon-source" style="display: none; font-size: 9px; color: var(--text-secondary); margin-top: 2px; font-family: monospace;">
+                    Loading...
+                </div>
+            </div>
+        `;
+        }).join('');
+
+        // Setup filtering
+        setupFiltering(wizard);
+
+        // Handle app selection
+        setupAppSelection(wizard, apps);
+
+        // Setup icon source toggle
+        setupIconSourceToggle(wizard, iconBase);
+
+        // Setup refetch button
+        setupRefetchButton(wizard);
+
+        // Detect icon sources asynchronously
+        detectIconSources(iconBase);
+
+        // Trigger background app name prefetch
+        prefetchAppNames(wizard);
+
+        // Also trigger icon prefetch in background
+        fetch(`${getApiBase()}/adb/prefetch-icons/${encodeURIComponent(wizard.selectedDevice)}`, {
+            method: 'POST'
+        }).then(() => console.log('[Step2] Icon prefetch triggered'))
+          .catch(() => {});
+
+    } catch (error) {
+        console.error('[Step2] Error loading apps:', error);
+        appList.innerHTML = `
+            <div class="error-state">
+                <p>Error loading apps: ${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Setup app filtering (search + system apps)
+ */
+function setupFiltering(wizard) {
+    const filterApps = () => {
+        const search = (document.getElementById('appSearch')?.value || '').toLowerCase();
+        document.querySelectorAll('.app-item').forEach(item => {
+            const label = item.dataset.label.toLowerCase();
+            const pkg = item.dataset.package.toLowerCase();
+            const isSystem = item.dataset.isSystem === 'true';
+
+            const searchMatches = !search || label.includes(search) || pkg.includes(search);
+            const systemFilter = !wizard.hideSystemApps || !isSystem;
+
+            item.style.display = (searchMatches && systemFilter) ? '' : 'none';
+        });
+    };
+
+    // Search input
+    const searchInput = document.getElementById('appSearch');
+    if (searchInput) {
+        searchInput.addEventListener('input', filterApps);
+    }
+
+    // System apps toggle
+    const systemAppsBtn = document.getElementById('btnToggleSystemApps');
+    if (systemAppsBtn) {
+        filterApps(); // Apply initial filter
+        systemAppsBtn.addEventListener('click', () => {
+            wizard.hideSystemApps = !wizard.hideSystemApps;
+            systemAppsBtn.textContent = wizard.hideSystemApps ? '🛠️ Hide System Apps' : '🛠️ Show System Apps';
+            filterApps();
+        });
+    }
+}
+
+/**
+ * Setup app selection handlers
+ */
+function setupAppSelection(wizard, apps) {
+    document.querySelectorAll('.app-item').forEach((item, index) => {
+        item.addEventListener('click', async () => {
+            document.querySelectorAll('.app-item').forEach(i => i.classList.remove('selected'));
+            item.classList.add('selected');
+
+            const appIndex = Array.from(document.querySelectorAll('.app-item')).indexOf(item);
+            wizard.selectedApp = apps[appIndex];
+            console.log('[Step2] App selected:', wizard.selectedApp);
+
+            // Load navigation graph data if available
+            await loadNavigationData(wizard, wizard.selectedApp.package);
+        });
+    });
+}
+
+/**
+ * Load navigation graph data for the selected app
+ * Shows screen count and navigation info if the Android app has learned this app's navigation
+ */
+async function loadNavigationData(wizard, packageName) {
+    const navInfoEl = document.getElementById('navigationInfo');
+
+    // Create navigation info panel if it doesn't exist
+    let navPanel = navInfoEl;
+    if (!navPanel) {
+        const appList = document.getElementById('appList');
+        navPanel = document.createElement('div');
+        navPanel.id = 'navigationInfo';
+        navPanel.className = 'navigation-info-panel';
+        appList.parentNode.insertBefore(navPanel, appList);
+    }
+
+    navPanel.innerHTML = '<div class="nav-loading">🔍 Checking navigation data...</div>';
+    navPanel.style.display = 'block';
+
+    try {
+        const response = await fetch(`${getApiBase()}/navigation/${encodeURIComponent(packageName)}/stats?allow_missing=1`);
+
+        if (!response.ok) {
+            // No navigation data for this app
+            navPanel.innerHTML = `
+                <div class="nav-no-data">
+                    <span class="nav-icon">📱</span>
+                    <span class="nav-text">No navigation data yet</span>
+                    <span class="nav-hint">The Android app will learn navigation as you create flows</span>
+                </div>
+            `;
+            wizard.navigationGraph = null;
+            return;
+        }
+
+        const data = await response.json();
+        const stats = data.stats;
+        if (!stats) {
+            navPanel.innerHTML = `
+                <div class="nav-no-data">
+                    <span class="nav-icon">📱</span>
+                    <span class="nav-text">No navigation data yet</span>
+                    <span class="nav-hint">The Android app will learn navigation as you create flows</span>
+                </div>
+            `;
+            wizard.navigationGraph = null;
+            return;
+        }
+
+        // Store navigation data for use in Step 3
+        wizard.navigationStats = stats;
+
+        // Also load full graph for screen lookups
+        const graphResponse = await fetch(`${getApiBase()}/navigation/${encodeURIComponent(packageName)}`);
+        if (graphResponse.ok) {
+            const graphData = await graphResponse.json();
+            wizard.navigationGraph = graphData.graph;
+        }
+
+        console.log('[Step2] Navigation data loaded:', stats);
+
+        navPanel.innerHTML = `
+            <div class="nav-data-found">
+                <span class="nav-icon">🗺️</span>
+                <span class="nav-title">Navigation Data Available</span>
+                <div class="nav-stats">
+                    <span class="nav-stat">
+                        <span class="stat-value">${stats.screen_count}</span>
+                        <span class="stat-label">Screens</span>
+                    </span>
+                    <span class="nav-stat">
+                        <span class="stat-value">${stats.transition_count}</span>
+                        <span class="stat-label">Transitions</span>
+                    </span>
+                    ${stats.home_screen_id ? `
+                    <span class="nav-stat home">
+                        <span class="stat-value">✓</span>
+                        <span class="stat-label">Home Screen</span>
+                    </span>
+                    ` : ''}
+                </div>
+                <span class="nav-hint">Navigation context will be shown during recording</span>
+            </div>
+        `;
+
+    } catch (error) {
+        console.warn('[Step2] Error loading navigation data:', error);
+        navPanel.innerHTML = `
+            <div class="nav-no-data">
+                <span class="nav-icon">📱</span>
+                <span class="nav-text">No navigation data yet</span>
+                <span class="nav-hint">The Android app will learn navigation as you create flows</span>
+            </div>
+        `;
+        wizard.navigationGraph = null;
+    }
+}
+
+/**
+ * Setup icon source toggle button
+ */
+function setupIconSourceToggle(wizard, iconBase) {
+    const toggleBtn = document.getElementById('btnToggleIconSources');
+    const statusPanel = document.getElementById('iconFetchingStatus');
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            wizard.showIconSources = !wizard.showIconSources;
+            toggleBtn.textContent = wizard.showIconSources ? '🔍 Hide Icon Sources' : '🔍 Show Icon Sources';
+
+            document.querySelectorAll('.app-icon-source').forEach(label => {
+                label.style.display = wizard.showIconSources ? 'block' : 'none';
+            });
+
+            if (statusPanel) {
+                statusPanel.style.display = wizard.showIconSources ? 'block' : 'none';
+            }
+
+            if (wizard.showIconSources) {
+                startQueueStatsPolling(wizard);
+            } else {
+                stopQueueStatsPolling(wizard);
+            }
+        });
+    }
+}
+
+/**
+ * Setup refetch button
+ */
+function setupRefetchButton(wizard) {
+    const refetchBtn = document.getElementById('btnRefetchIcons');
+    if (refetchBtn) {
+        refetchBtn.addEventListener('click', async () => {
+            await refetchAllIcons(wizard);
+        });
+    }
+}
+
+/**
+ * Detect icon sources by checking headers
+ */
+async function detectIconSources(iconBase) {
+    const iconImages = document.querySelectorAll('.app-icon');
+    const batchSize = 10;
+    const packages = Array.from(iconImages).map(img => img.dataset.package).filter(Boolean);
+
+    for (let i = 0; i < packages.length; i += batchSize) {
+        const batch = packages.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (packageName) => {
+            try {
+                const iconUrl = `${iconBase}/${encodeURIComponent(packageName)}`;
+                const response = await fetch(iconUrl);
+
+                if (!response.ok) return;
+
+                const iconSource = response.headers.get('X-Icon-Source');
+                const img = Array.from(iconImages).find(el => el.dataset.package === packageName);
+                const sourceLabel = img?.parentElement.querySelector('.app-icon-source');
+
+                if (!sourceLabel) return;
+
+                let source = 'Unknown';
+                let color = 'var(--text-secondary)';
+
+                switch (iconSource) {
+                    case 'device-scraper':
+                        source = '📱 Device Scraper';
+                        color = '#8b5cf6';
+                        break;
+                    case 'playstore':
+                        source = '🏪 Play Store';
+                        color = '#3b82f6';
+                        break;
+                    case 'apk-extraction':
+                        source = '📦 APK Extraction';
+                        color = '#22c55e';
+                        break;
+                    case 'svg-placeholder':
+                        source = '⚪ SVG Placeholder';
+                        color = '#94a3b8';
+                        break;
+                    default:
+                        source = `❓ ${iconSource || 'Unknown'}`;
+                        break;
+                }
+
+                sourceLabel.textContent = source;
+                sourceLabel.style.color = color;
+
+            } catch (error) {
+                console.debug(`[Step2] Failed to detect icon source for ${packageName}:`, error);
+            }
+        }));
+    }
+
+    console.log('[Step2] Icon source detection complete');
+}
+
+/**
+ * Trigger background app name prefetch
+ */
+async function prefetchAppNames(wizard) {
+    if (!wizard.selectedDevice) return;
+
+    try {
+        console.log('[Step2] Triggering app name prefetch...');
+        const response = await fetch(`${getApiBase()}/adb/prefetch-app-names/${encodeURIComponent(wizard.selectedDevice)}`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) return;
+
+        const result = await response.json();
+        console.log(`[Step2] App name prefetch queued: ${result.queued_count} apps`);
+
+    } catch (error) {
+        console.debug('[Step2] App name prefetch error:', error);
+    }
+}
+
+/**
+ * Start polling queue stats
+ */
+function startQueueStatsPolling(wizard) {
+    updateQueueStats();
+    wizard.queueStatsInterval = setInterval(() => updateQueueStats(), 2000);
+    console.log('[Step2] Started queue stats polling');
+}
+
+/**
+ * Stop polling queue stats
+ */
+function stopQueueStatsPolling(wizard) {
+    if (wizard.queueStatsInterval) {
+        clearInterval(wizard.queueStatsInterval);
+        wizard.queueStatsInterval = null;
+        console.log('[Step2] Stopped queue stats polling');
+    }
+}
+
+/**
+ * Update queue stats display
+ */
+async function updateQueueStats() {
+    // Icon queue stats
+    try {
+        const response = await fetch(`${getApiBase()}/adb/icon-queue-stats`);
+        if (!response.ok) return;
+
+        const stats = await response.json();
+        const statusIcon = document.getElementById('fetchingStatusIcon');
+        const statusText = document.getElementById('fetchingStatusText');
+
+        if (!statusIcon || !statusText) return;
+
+        const { queue_size, processing_count } = stats;
+        const totalPending = queue_size + processing_count;
+
+        if (totalPending === 0) {
+            statusIcon.textContent = '✅';
+            statusText.textContent = 'All icons fetched';
+            statusText.style.color = '#22c55e';
+        } else {
+            statusIcon.textContent = '⏳';
+            statusText.textContent = `Fetching icons... (${totalPending} remaining, ${processing_count} in progress)`;
+            statusText.style.color = '#3b82f6';
+        }
+
+    } catch (error) {
+        console.debug('[Step2] Failed to fetch icon queue stats:', error);
+    }
+
+    // App name queue stats
+    try {
+        const response = await fetch(`${getApiBase()}/adb/app-name-queue-stats`);
+        if (!response.ok) return;
+
+        const stats = await response.json();
+        const statusIcon = document.getElementById('appNameStatusIcon');
+        const statusText = document.getElementById('appNameStatusText');
+
+        if (!statusIcon || !statusText) return;
+
+        const { queue_size, processing_count, completed_count, total_requested, progress_percentage } = stats;
+        const totalPending = queue_size + processing_count;
+
+        if (total_requested === 0) {
+            statusIcon.textContent = '⏱️';
+            statusText.textContent = 'No app name fetch requested';
+            statusText.style.color = '#94a3b8';
+        } else if (totalPending === 0 && completed_count > 0) {
+            statusIcon.textContent = '✅';
+            statusText.textContent = `All app names fetched (${completed_count} apps)`;
+            statusText.style.color = '#22c55e';
+        } else if (totalPending > 0) {
+            statusIcon.textContent = '📝';
+            statusText.textContent = `Fetching app names... ${progress_percentage}% (${completed_count}/${total_requested}, ${processing_count} in progress)`;
+            statusText.style.color = '#3b82f6';
+        }
+
+    } catch (error) {
+        console.debug('[Step2] Failed to fetch app name queue stats:', error);
+    }
+}
+
+/**
+ * Refetch all app icons
+ */
+async function refetchAllIcons(wizard) {
+    if (!wizard.selectedDevice) {
+        showToast('No device selected', 'error');
+        return;
+    }
+
+    const refetchBtn = document.getElementById('btnRefetchIcons');
+    const originalText = refetchBtn?.textContent;
+
+    try {
+        if (refetchBtn) {
+            refetchBtn.disabled = true;
+            refetchBtn.textContent = '⏳ Refetching...';
+        }
+
+        const response = await fetch(
+            `${getApiBase()}/adb/prefetch-icons/${encodeURIComponent(wizard.selectedDevice)}`,
+            { method: 'POST' }
+        );
+
+        if (!response.ok) throw new Error('Refetch failed');
+
+        const result = await response.json();
+        showToast(`Queued ${result.apps_queued} apps for icon fetching`, 'success');
+
+        updateQueueStats();
+
+        setTimeout(() => {
+            const iconBase = `${getApiBase()}/adb/app-icon/${encodeURIComponent(wizard.selectedDevice)}`;
+            detectIconSources(iconBase);
+        }, 3000);
+
+    } catch (error) {
+        console.error('[Step2] Refetch failed:', error);
+        showToast('Failed to refetch icons', 'error');
+    } finally {
+        if (refetchBtn) {
+            refetchBtn.disabled = false;
+            refetchBtn.textContent = originalText || '🔄 Refetch All Icons';
+        }
+    }
+}
+
+/**
+ * Validate Step 2
+ * @param {Object} wizard - FlowWizard instance
+ * @returns {boolean}
+ */
+export function validateStep(wizard) {
+    if (!wizard.selectedApp) {
+        alert('Please select an app');
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Get Step 2 data
+ * @param {Object} wizard - FlowWizard instance
+ * @returns {Object}
+ */
+export function getStepData(wizard) {
+    return {
+        selectedApp: wizard.selectedApp,
+        recordMode: wizard.recordMode
+    };
+}
+
+/**
+ * Cleanup when leaving Step 2
+ */
+export function cleanup(wizard) {
+    stopQueueStatsPolling(wizard);
+}
+
+export default { loadStep, validateStep, getStepData, cleanup };

@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="app-version" content="0.2.34">
+    <title>Welcome to Visual Mapper - Setup Wizard</title>
+    <link rel="stylesheet" href="css/styles.css?v=0.2.34">
+    <link rel="stylesheet" href="css/onboarding.css?v=0.2.34">
+</head>
+<body>
+    <div class="onboarding-container">
+        <!-- Header -->
+        <div class="onboarding-header">
+            <h1>Welcome to Visual Mapper</h1>
+            <p>Android device monitoring and automation for Home Assistant</p>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+
+        <!-- Step Indicator -->
+        <div class="step-indicator">
+            <div class="step active" data-step="1">
+                <div class="step-number">1</div>
+                <div class="step-label">Welcome</div>
+            </div>
+            <div class="step" data-step="2">
+                <div class="step-number">2</div>
+                <div class="step-label">Connect Device</div>
+            </div>
+            <div class="step" data-step="3">
+                <div class="step-number">3</div>
+                <div class="step-label">Test Connection</div>
+            </div>
+            <div class="step" data-step="4">
+                <div class="step-number">4</div>
+                <div class="step-label">MQTT</div>
+            </div>
+            <div class="step" data-step="5">
+                <div class="step-number">5</div>
+                <div class="step-label">Security</div>
+            </div>
+            <div class="step" data-step="6">
+                <div class="step-number">6</div>
+                <div class="step-label">Complete</div>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="onboarding-content">
+            <!-- Step 1: Welcome -->
+            <div class="step-content active" id="step1">
+                <h2 class="step-title">Let's get started!</h2>
+                <p class="step-description">
+                    Visual Mapper lets you monitor and control Android devices through Home Assistant.
+                    This quick setup wizard will help you connect your first device.
+                </p>
+
+                <div class="info-box">
+                    <h3>What you'll need:</h3>
+                    <ul>
+                        <li>Android device connected to the same network</li>
+                        <li>ADB (Wireless Debugging) enabled on your device</li>
+                        <li>Device IP address (we can scan for it!)</li>
+                    </ul>
+                </div>
+
+                <div class="status-message info show">
+                    <strong>First time setup</strong><br>
+                    This wizard will guide you through connecting your first device. You can add more devices later from the Devices page.
+                </div>
+            </div>
+
+            <!-- Step 2: Connect Device -->
+            <div class="step-content" id="step2">
+                <h2 class="step-title">Connect Your Android Device</h2>
+                <p class="step-description">
+                    Choose how you'd like to find your device. We recommend scanning for the easiest setup.
+                </p>
+
+                <div class="connection-methods">
+                    <div class="method-card" id="methodScan" onclick="selectMethod('scan')">
+                        <div class="method-icon">🔍</div>
+                        <div class="method-title">Scan Network</div>
+                        <div class="method-description">Automatically find devices on your network</div>
+                    </div>
+                    <div class="method-card" id="methodManual" onclick="selectMethod('manual')">
+                        <div class="method-icon">⌨️</div>
+                        <div class="method-title">Manual Entry</div>
+                        <div class="method-description">Enter IP address and port manually</div>
+                    </div>
+                </div>
+
+                <!-- Android 11+ Warning -->
+                <div class="info-box-warning" style="margin: 15px 0; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px;">
+                    <p style="margin: 0; color: #856404; font-size: 13px;">
+                        <strong>Note for Android 11+ devices:</strong><br>
+                        Network scan may not find devices using <strong>Wireless Debugging</strong> because the port changes each time it's enabled.
+                        If your device isn't found, use <strong>Manual Entry</strong> with "Wireless Pairing" to pair your device first.
+                        You'll need both the pairing port AND connection port shown on your device's Wireless Debugging screen.
+                    </p>
+                </div>
+
+                <!-- Scan Results (hidden by default) -->
+                <div id="scanResults" class="hidden">
+                    <h3>Found Devices:</h3>
+                    <div class="device-list" id="deviceList"></div>
+                </div>
+
+                <!-- Manual Entry Form (hidden by default) -->
+                <div id="manualForm" class="hidden">
+                    <div class="form-group">
+                        <label for="connectionType">Connection Type</label>
+                        <select id="connectionType">
+                            <option value="tcp">TCP/IP - Legacy (Port 5555)</option>
+                            <option value="wireless">Wireless ADB - Android 11+ (Port 5555)</option>
+                            <option value="pairing">Wireless Pairing - Android 11+ (Port varies)</option>
+                            <option value="tls">TLS/Secure ADB (Custom Port)</option>
+                        </select>
+                    </div>
+
+                    <!-- TCP/IP and Wireless ADB Config -->
+                    <div id="tcpConfig">
+                        <div class="form-group">
+                            <label for="deviceIp">Device IP Address</label>
+                            <input type="text" id="deviceIp" placeholder="192.168.1.100">
+                        </div>
+                        <div class="form-group">
+                            <label for="devicePort">ADB Port</label>
+                            <input type="number" id="devicePort" value="5555" placeholder="5555">
+                        </div>
+                    </div>
+
+                    <!-- Pairing Config (Android 11+) -->
+                    <div id="pairingConfig" class="hidden">
+                        <div class="info-box-info">
+                            <p>
+                                <strong>Android 11+ Wireless Pairing:</strong><br>
+                                1. Settings → Developer Options → Wireless debugging<br>
+                                2. Tap "Pair device with pairing code"<br>
+                                3. You'll see TWO ports - enter BOTH below along with the 6-digit code
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="pairingCode">Pairing Code (6-digit)</label>
+                            <input type="text" id="pairingCode" placeholder="123456" maxlength="6">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="pairingHost">Device IP Address</label>
+                            <input type="text" id="pairingHost" placeholder="192.168.1.2">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="pairingPort">Pairing Port</label>
+                            <input type="number" id="pairingPort" placeholder="37899">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="connectionPort">Connection Port</label>
+                            <input type="number" id="connectionPort" placeholder="45441">
+                        </div>
+                    </div>
+
+                    <!-- Wireless Config Info -->
+                    <div id="wirelessConfig" class="hidden">
+                        <div class="info-box-info">
+                            <p>
+                                <strong>Wireless ADB Setup (Android 11+):</strong><br>
+                                1. Enable Developer Options on your Android device<br>
+                                2. Go to Settings → Developer Options → Wireless debugging<br>
+                                3. Tap "Wireless debugging" to enable it<br>
+                                4. Note the IP address and port shown (e.g., 192.168.1.100:5555)
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- TLS Config Info -->
+                    <div id="tlsConfig" class="hidden">
+                        <div class="info-box-warning">
+                            <p>
+                                <strong>TLS/Secure ADB:</strong><br>
+                                Advanced secure connection with certificate authentication.<br>
+                                Requires pre-configured certificates on both client and device.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-message" id="step2Status"></div>
+            </div>
+
+            <!-- Step 3: Test Connection -->
+            <div class="step-content" id="step3">
+                <h2 class="step-title">Testing Connection...</h2>
+                <p class="step-description">
+                    Please wait while we verify the connection to your device.
+                </p>
+
+                <div class="text-center mt-4">
+                    <div class="spinner spinner-large"></div>
+                    <p class="connecting-text">Connecting to device...</p>
+                </div>
+
+                <div class="status-message" id="step3Status"></div>
+            </div>
+
+            <!-- Step 4: MQTT Setup -->
+            <div class="step-content" id="step4">
+                <h2 class="step-title">Configure MQTT</h2>
+                <p class="step-description">
+                    MQTT connects Visual Mapper to Home Assistant for automatic sensor discovery.
+                </p>
+
+                <div id="mqttStatus" class="status-message info show">
+                    <strong>Checking MQTT configuration...</strong>
+                </div>
+
+                <div id="mqttConfigForm" class="hidden">
+                    <div class="form-group">
+                        <label for="mqttBroker">MQTT Broker</label>
+                        <input type="text" id="mqttBroker" placeholder="core-mosquitto or localhost">
+                        <small style="color: var(--onboarding-text-secondary);">For Home Assistant, use "core-mosquitto"</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mqttPort">MQTT Port</label>
+                        <input type="number" id="mqttPort" value="1883" placeholder="1883">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mqttUsername">Username (optional)</label>
+                        <input type="text" id="mqttUsername" placeholder="Leave empty if not required">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mqttPassword">Password (optional)</label>
+                        <input type="password" id="mqttPassword" placeholder="Leave empty if not required">
+                    </div>
+
+                    <button type="button" class="btn btn-secondary" onclick="testMqtt()" style="margin-top: 16px;">
+                        Test Connection
+                    </button>
+                </div>
+
+                <div class="status-message" id="step4MqttStatus"></div>
+            </div>
+
+            <!-- Step 5: Security Setup -->
+            <div class="step-content" id="step5">
+                <h2 class="step-title">Configure Device Security</h2>
+                <p class="step-description">
+                    Choose how Visual Mapper should handle your device's lock screen during automation.
+                </p>
+
+                <div id="securityConfigContainer">
+                    <!-- Security config UI will be injected here by device-security.js -->
+                </div>
+
+                <div class="status-message" id="step5Status"></div>
+            </div>
+
+            <!-- Step 6: Complete -->
+            <div class="step-content" id="step6">
+                <div class="text-center">
+                    <div class="success-icon">✓</div>
+                    <h2 class="step-title">Setup Complete!</h2>
+                    <p class="step-description">
+                        Your device is connected and ready to use.
+                    </p>
+
+                    <div class="info-box" style="text-align: left;">
+                        <h3>Next Steps:</h3>
+                        <ul class="next-steps-list">
+                            <li><strong>Create Sensors:</strong> Go to Sensors page to capture data from your device</li>
+                            <li><strong>Build Flows:</strong> Automate sensor collection with scheduled flows</li>
+                            <li><strong>View in Home Assistant:</strong> Your sensors will appear automatically via MQTT</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Actions -->
+        <div class="onboarding-actions">
+            <button class="btn btn-secondary" id="btnBack" onclick="previousStep()" style="display: none;">
+                ← Back
+            </button>
+            <div id="skipContainer">
+                <button class="btn btn-secondary" onclick="skipOnboarding()">
+                    Skip Setup
+                </button>
+            </div>
+            <button class="btn btn-primary" id="btnNext" onclick="nextStep()">
+                Get Started →
+            </button>
+        </div>
+    </div>
+
+    <!-- Load init.js first to set up globals -->
+    <script src="js/init.js?v=0.2.34"></script>
+
+    <script type="module">
+        // Use globals set by init.js (already loaded above)
+        // init.js auto-runs initApp() but skips onboarding redirect since we're on onboarding.html
+
+        // Now load onboarding module
+        const { OnboardingWizard } = await import('./js/modules/onboarding.js?v=0.1.17');
+
+        // Initialize wizard
+        window.wizard = new OnboardingWizard();
+        await wizard.init();
+
+        // Expose functions globally for onclick handlers
+        window.selectMethod = (method) => wizard.selectConnectionMethod(method);
+        window.nextStep = () => wizard.nextStep();
+        window.previousStep = () => wizard.previousStep();
+        window.skipOnboarding = () => wizard.skip();
+        window.testMqtt = () => wizard.testMqttConnection();
+    </script>
+</body>
+</html>

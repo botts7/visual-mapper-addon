@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.2.34" data-build="2026-01-09">
+    <title>Flow Wizard - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/styles.css?v=0.2.34">
+    <link rel="stylesheet" href="css/flow-wizard.css?v=0.2.34">
+    <link rel="stylesheet" href="css/smart-suggestions.css?v=0.2.34">
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.2.34"></script>
+
+    <div class="wizard-container">
+        <!-- Progress Indicator -->
+        <div class="wizard-progress">
+            <div class="step active" data-step="1">
+                <div class="step-number">1</div>
+                <div class="step-label">Device</div>
+            </div>
+            <div class="step" data-step="2">
+                <div class="step-number">2</div>
+                <div class="step-label">App & Mode</div>
+            </div>
+            <div class="step" data-step="3">
+                <div class="step-number">3</div>
+                <div class="step-label">Record</div>
+            </div>
+            <div class="step" data-step="4">
+                <div class="step-number">4</div>
+                <div class="step-label">Review</div>
+            </div>
+            <div class="step" data-step="5">
+                <div class="step-number">5</div>
+                <div class="step-label">Settings</div>
+            </div>
+        </div>
+
+        <!-- Step 1: Device Selection -->
+        <div id="step1" class="wizard-step active">
+            <h2>Select Device</h2>
+            <p class="step-description">Choose which Android device should run this flow</p>
+            <div id="deviceList" class="loading">Loading devices...</div>
+        </div>
+
+        <!-- Step 2: App Selection & Recording Mode -->
+        <div id="step2" class="wizard-step">
+            <h2>Select App & Recording Mode</h2>
+
+            <div class="recording-mode-selector">
+                <h3>How should we record this flow?</h3>
+                <div class="mode-options">
+                    <label class="mode-option">
+                        <input type="radio" name="recordMode" value="execute" checked>
+                        <div class="mode-card">
+                            <h4>▶️ Record & Execute</h4>
+                            <p>Taps will happen on your device immediately. You'll see the app navigate in real-time as you build the flow.</p>
+                            <span class="badge badge-recommended">Recommended</span>
+                        </div>
+                    </label>
+
+                    <label class="mode-option">
+                        <input type="radio" name="recordMode" value="record-only">
+                        <div class="mode-card">
+                            <h4>📝 Record Only</h4>
+                            <p>Just record coordinates without touching the device. Test the flow later.</p>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="app-launch-options" style="margin: 16px 0; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="freshStartToggle" checked style="width: 18px; height: 18px;">
+                    <div>
+                        <strong>Fresh Start</strong>
+                        <p style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-secondary);">
+                            Force-stop and restart app from beginning (recommended for consistent recordings)
+                        </p>
+                    </div>
+                </label>
+            </div>
+
+            <h3>Select App to Automate</h3>
+            <div class="app-search" style="display: flex; gap: 10px; align-items: center;">
+                <input type="text" id="appSearch" class="search-input" placeholder="🔍 Search apps..." style="flex: 1;">
+                <button type="button" id="btnToggleSystemApps" class="btn btn-secondary" style="white-space: nowrap;">
+                    🛠️ Hide System Apps
+                </button>
+                <button type="button" id="btnToggleIconSources" class="btn btn-secondary" style="white-space: nowrap;">
+                    🔍 Show Icon Sources
+                </button>
+            </div>
+
+            <!-- Dev Mode Status Panel (hidden by default, shown when dev toggle is on) -->
+            <div id="iconFetchingStatus" style="display: none; padding: 10px; margin: 10px 0; background: #f1f5f9; border-radius: 6px; border: 1px solid #cbd5e1;">
+                <!-- Icon Status -->
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="fetchingStatusIcon">⏳</span>
+                        <span id="fetchingStatusText" style="font-size: 13px; font-weight: 500;">Checking...</span>
+                    </div>
+                    <button type="button" id="btnRefetchIcons" class="btn btn-sm btn-primary" style="white-space: nowrap;">
+                        🔄 Refetch All Icons
+                    </button>
+                </div>
+                <!-- App Name Status -->
+                <div style="display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid #cbd5e1;">
+                    <span id="appNameStatusIcon">⏳</span>
+                    <span id="appNameStatusText" style="font-size: 13px; font-weight: 500; color: #64748b;">Checking app names...</span>
+                </div>
+            </div>
+
+            <div id="appList" class="app-grid loading">Loading apps...</div>
+        </div>
+
+        <!-- Step 3: Recording Mode -->
+        <div id="step3" class="wizard-step">
+            <div class="recording-layout">
+                <!-- Screenshot Panel (Main) -->
+                <div class="screenshot-panel">
+                    <div id="step3SetupStatus" class="setup-status hidden">
+                        <div class="setup-status-left">
+                            <div class="setup-status-title">Preparing to record</div>
+                            <div id="step3SetupMessage" class="setup-status-message">Starting...</div>
+                        </div>
+                        <div id="step3SetupMode" class="setup-status-mode">Start mode: Restart app</div>
+                    </div>
+                    <!-- Quick Actions Toolbar -->
+                    <div class="quick-actions-bar">
+                        <!-- App Info -->
+                        <div class="toolbar-app-info">
+                            <img id="appIcon" src="" alt="" class="toolbar-app-icon">
+                            <span id="appName" class="toolbar-app-name"></span>
+                        </div>
+                        <!-- Screen Info (Phase 1 - Activity Tracking) -->
+                        <div class="toolbar-screen-info" title="Current screen activity">
+                            <span class="screen-label">Screen:</span>
+                            <span id="currentActivity" class="current-activity">--</span>
+                        </div>
+                        <div class="quick-divider"></div>
+
+                        <!-- Navigation -->
+                        <button class="quick-btn with-label" id="qabRefresh" title="Refresh Screen">
+                            <span class="btn-icon">↻</span><span class="btn-label">Refresh</span>
+                        </button>
+                        <button class="quick-btn with-label" id="qabBack" title="Back">
+                            <span class="btn-icon">←</span><span class="btn-label">Back</span>
+                        </button>
+                        <button class="quick-btn with-label" id="qabHome" title="Home">
+                            <span class="btn-icon">⌂</span><span class="btn-label">Home</span>
+                        </button>
+                        <div class="quick-divider"></div>
+
+                        <!-- Zoom -->
+                        <button class="quick-btn" id="qabZoomOut" title="Zoom Out">−</button>
+                        <span class="zoom-display" id="zoomLevel">100%</span>
+                        <button class="quick-btn" id="qabZoomIn" title="Zoom In">+</button>
+                        <button class="quick-btn" id="qabFit" title="Fit to Screen">Fit</button>
+                        <button class="quick-btn" id="qabScale" title="Toggle 1:1 Scale">1:1</button>
+                        <div class="quick-divider"></div>
+
+                        <!-- Recording Toggle -->
+                        <button class="quick-btn with-label recording-active" id="qabRecordToggle" title="Toggle action recording on/off">
+                            <span class="btn-icon">⏺</span><span class="btn-label">Recording</span>
+                        </button>
+
+                        <!-- Wait/Delay -->
+                        <button class="quick-btn" id="qabWait" title="Add wait/delay step">
+                            ⏱️
+                        </button>
+                        <div class="quick-divider"></div>
+
+                        <!-- Stream Controls (logically ordered) -->
+                        <select id="captureMode" class="quick-select" title="Capture Mode">
+                            <option value="polling">Polling</option>
+                            <option value="streaming">Stream</option>
+                        </select>
+                        <select id="streamQuality" class="quick-select" title="Stream Quality">
+                            <option value="high">Native</option>
+                            <option value="medium">720p</option>
+                            <option value="low">480p</option>
+                            <option value="fast">360p</option>
+                            <option value="ultrafast">240p WiFi</option>
+                        </select>
+                        <select id="streamMode" class="quick-select" title="Stream Protocol">
+                            <option value="websocket">WebSocket</option>
+                            <option value="mjpeg">MJPEG</option>
+                        </select>
+                        <button class="quick-btn" id="qabReconnect" title="Reconnect Stream">⟳</button>
+                        <span id="connectionStatus" class="connection-status" style="min-width: 100px; text-align: center;"></span>
+                        <div class="quick-divider"></div>
+
+                        <!-- Actions -->
+                        <button class="quick-btn with-label" id="qabPullRefresh" title="Pull-to-Refresh the Android app">
+                            <span class="btn-icon">↻</span><span class="btn-label">Pull Refresh</span>
+                        </button>
+                        <button class="quick-btn with-label" id="qabRestartApp" title="Force stop and restart the app">
+                            <span class="btn-icon">🔄</span><span class="btn-label">Restart App</span>
+                        </button>
+                        <button class="quick-btn with-label" id="qabStitch" title="Full Page Capture">
+                            <span class="btn-icon">📸</span><span class="btn-label">Stitch</span>
+                        </button>
+                        <div class="quick-divider"></div>
+
+                        <!-- Insert Existing -->
+                        <button class="quick-btn with-label" id="qabInsertSensor" title="Insert existing sensor into flow (smart detection)">
+                            <span class="btn-icon">📊</span><span class="btn-label">+ Sensor</span>
+                        </button>
+                        <button class="quick-btn with-label" id="qabInsertAction" title="Insert existing action into flow">
+                            <span class="btn-icon">⚡</span><span class="btn-label">+ Action</span>
+                        </button>
+                        <button class="quick-btn" id="qabOverlay" title="Toggle Overlay Settings">⚙️</button>
+                    </div>
+
+                    <!-- Overlay Settings (collapsible) -->
+                    <div id="overlaySettings" class="overlay-settings" style="display: none;">
+                        <label><input type="checkbox" id="filterClickable" checked> Clickable</label>
+                        <label><input type="checkbox" id="filterNonClickable"> Non-Clickable</label>
+                        <label><input type="checkbox" id="filterTextLabels" checked> Labels</label>
+                        <label><input type="checkbox" id="filterMinSize" checked> Hide Small</label>
+                        <label><input type="checkbox" id="filterDividers" checked> Hide Dividers</label>
+                        <label><input type="checkbox" id="filterContainers" checked> Hide Containers</label>
+                        <label><input type="checkbox" id="filterEmptyElements" checked> Hide Empty</label>
+                        <span class="settings-divider">|</span>
+                        <label title="Element refresh interval in seconds">
+                            Refresh: <select id="elementRefreshInterval" style="padding: 2px 4px; font-size: 12px;">
+                                <option value="1000">1s</option>
+                                <option value="2000">2s</option>
+                                <option value="3000" selected>3s</option>
+                                <option value="5000">5s</option>
+                                <option value="10000">10s</option>
+                            </select>
+                        </label>
+                        <label title="Learn navigation screens while recording">
+                            <input type="checkbox" id="autoLearnScreens" checked> Learn Screens
+                        </label>
+                    </div>
+
+                    <!-- Screenshot Display -->
+                    <div id="screenshotContainer" class="screenshot-display">
+                        <canvas id="screenshotCanvas"></canvas>
+                        <!-- Step 3 Setup Overlay (covers canvas during device preparation) -->
+                        <div id="step3SetupOverlay" class="setup-overlay">
+                            <div class="setup-overlay-content">
+                                <div class="setup-app-icon">
+                                    <img id="setupAppIcon" src="" alt="">
+                                </div>
+                                <h3 id="setupAppName">Preparing App</h3>
+                                <div class="setup-steps">
+                                    <div class="setup-step" data-step="register">
+                                        <span class="step-icon">1</span>
+                                        <span class="step-text">Registering session</span>
+                                        <span class="step-status"></span>
+                                    </div>
+                                    <div class="setup-step" data-step="wake">
+                                        <span class="step-icon">2</span>
+                                        <span class="step-text">Waking device</span>
+                                        <span class="step-status"></span>
+                                    </div>
+                                    <div class="setup-step" data-step="unlock">
+                                        <span class="step-icon">3</span>
+                                        <span class="step-text">Unlocking screen</span>
+                                        <span class="step-status"></span>
+                                    </div>
+                                    <div class="setup-step" data-step="launch">
+                                        <span class="step-icon">4</span>
+                                        <span class="step-text">Launching app</span>
+                                        <span class="step-status"></span>
+                                    </div>
+                                    <div class="setup-step" data-step="wait">
+                                        <span class="step-icon">5</span>
+                                        <span class="step-text">Waiting for app to load</span>
+                                        <span class="step-status"></span>
+                                    </div>
+                                    <div class="setup-step" data-step="stream">
+                                        <span class="step-icon">6</span>
+                                        <span class="step-text">Starting live stream</span>
+                                        <span class="step-status"></span>
+                                    </div>
+                                </div>
+                                <p class="setup-hint">This may take 5-10 seconds</p>
+                            </div>
+                        </div>
+                        <!-- Loading Overlay -->
+                        <div id="screenshotLoading" class="screenshot-loading-overlay">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Loading...</div>
+                        </div>
+                        <!-- Hover tooltip -->
+                        <div id="hoverTooltip" class="hover-tooltip" style="display: none;">
+                            <div class="tooltip-header"></div>
+                            <div class="tooltip-body"></div>
+                        </div>
+                        <!-- Gesture hint -->
+                        <div class="gesture-hint">Click = Tap | Drag = Swipe</div>
+                    </div>
+                </div>
+
+                <!-- Right Panel (Tabbed: Elements / Flow) -->
+                <div id="rightPanel" class="right-panel">
+                    <!-- Tab Headers -->
+                    <div class="panel-tabs">
+                        <button class="panel-tab active" data-tab="elements">
+                            Elements <span id="elementCount" class="tab-badge">0</span>
+                        </button>
+                        <button class="panel-tab" data-tab="flow">
+                            Flow <span id="stepCount" class="tab-badge">0</span>
+                        </button>
+                        <button class="panel-tab" data-tab="suggestions">
+                            🤖 Smart <span id="suggestionsCount" class="tab-badge">0</span>
+                        </button>
+                    </div>
+
+                    <!-- Elements Tab Content -->
+                    <div id="tabElements" class="tab-content active">
+                        <div class="tree-toolbar">
+                            <input type="text" id="treeSearchInput" class="tree-search-input" placeholder="Search elements...">
+                            <button type="button" id="smartSuggestionsBtn" class="btn btn-secondary" title="AI-powered sensor suggestions">
+                                🤖 Smart Suggestions
+                            </button>
+                        </div>
+                        <div class="tree-filters">
+                            <label><input type="checkbox" id="treeFilterClickable"> Clickable only</label>
+                            <label><input type="checkbox" id="treeFilterText"> Has text</label>
+                        </div>
+                        <div id="elementTreeContainer" class="tree-content"></div>
+                    </div>
+
+                    <!-- Flow Tab Content -->
+                    <div id="tabFlow" class="tab-content">
+                        <div id="flowStepsList" class="flow-steps-list"></div>
+                        <div class="flow-actions">
+                            <button class="btn btn-secondary btn-sm" id="btnClearFlow">Clear All</button>
+                            <button class="btn btn-primary btn-done" id="btnDoneRecording">
+                                Done Recording →
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Smart Suggestions Tab Content -->
+                    <div id="tabSuggestions" class="tab-content">
+                        <div class="suggestions-toolbar">
+                            <div class="suggestion-mode-tabs">
+                                <button type="button" class="mode-tab active" data-mode="sensors">
+                                    📊 Sensors (<span id="sensorSuggestionsCount">0</span>)
+                                </button>
+                                <button type="button" class="mode-tab" data-mode="actions">
+                                    ⚡ Actions (<span id="actionSuggestionsCount">0</span>)
+                                </button>
+                            </div>
+                            <button type="button" id="refreshSuggestionsBtn" class="btn btn-secondary btn-sm">
+                                🔄 Refresh
+                            </button>
+                        </div>
+                        <div id="suggestionsContent" class="suggestions-content">
+                            <div class="suggestions-empty">
+                                <p>Click "Refresh" to analyze current screen and detect sensors/actions</p>
+                            </div>
+                        </div>
+                        <div class="suggestions-actions">
+                            <button type="button" class="btn btn-secondary btn-sm" id="selectAllSuggestionsTabBtn">
+                                Select All
+                            </button>
+                            <button type="button" class="btn btn-primary" id="addSelectedSuggestionsTabBtn">
+                                Add Selected (<span id="selectedSuggestionsCount">0</span>)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FAB for mobile panel toggle -->
+            <button id="panelToggleFab" class="panel-toggle-fab">☰</button>
+            <!-- Backdrop for mobile panel -->
+            <div id="panelBackdrop" class="panel-backdrop"></div>
+        </div>
+
+        <!-- Step 4: Review & Test -->
+        <div id="step4" class="wizard-step">
+            <h2>Review & Test Flow</h2>
+
+            <div class="review-controls">
+                <button class="btn btn-primary" id="btnTestFlow">▶️ Test Flow Now</button>
+                <p>Run this flow on your device to verify it works correctly</p>
+                <label class="execution-start-toggle">
+                    <input type="checkbox" id="startFromCurrentScreenToggle">
+                    <span>Start from current screen (skip app restart)</span>
+                </label>
+            </div>
+
+            <div id="flowStepsReview" class="flow-steps-review"></div>
+        </div>
+
+        <!-- Step 5: Settings & Save -->
+        <div id="step5" class="wizard-step">
+            <h2>Flow Settings</h2>
+
+            <div class="form-section">
+                <div class="form-group">
+                    <label for="flowName">Flow Name *</label>
+                    <input type="text" id="flowName" required class="form-control" placeholder="e.g., Morning News Check">
+                </div>
+
+                <div class="form-group">
+                    <label for="flowDescription">Description (optional)</label>
+                    <textarea id="flowDescription" rows="3" class="form-control" placeholder="What does this flow do?"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight: 600;">Execution Start</label>
+                    <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 10px;">
+                        Restarting the app ensures the flow always begins from a known state.
+                    </p>
+                    <label class="execution-start-toggle">
+                        <input type="checkbox" id="startFromCurrentScreen">
+                        <span>Start from current screen (skip app restart)</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="updateInterval">Run this flow every:</label>
+                    <div class="interval-input">
+                        <input type="number" id="intervalValue" value="60" min="1" class="form-control">
+                        <select id="intervalUnit" class="form-control">
+                            <option value="1">seconds</option>
+                            <option value="60" selected>minutes</option>
+                            <option value="3600">hours</option>
+                        </select>
+                    </div>
+                    <div class="quick-intervals">
+                        <button class="btn btn-sm" data-interval="60">1 min</button>
+                        <button class="btn btn-sm" data-interval="300">5 min</button>
+                        <button class="btn btn-sm" data-interval="900">15 min</button>
+                        <button class="btn btn-sm" data-interval="3600">1 hour</button>
+                    </div>
+                </div>
+
+                <!-- Headless Mode Options -->
+                <div class="form-group" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                    <label style="font-weight: 600; margin-bottom: 10px; display: block;">Headless Mode (Screen Control)</label>
+                    <p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 15px;">
+                        Auto-wake screen before flow, sleep after. Saves battery and works while device is idle.
+                    </p>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="autoWakeBefore" checked>
+                            <span>Auto-wake screen before flow</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="autoSleepAfter" checked>
+                            <span>Auto-sleep screen after flow</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" id="verifyScreenOn" checked>
+                            <span>Fail flow if screen won't wake</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <div class="wizard-nav">
+            <button id="btnBack" class="btn btn-secondary" disabled>← Back</button>
+            <button id="btnNext" class="btn btn-primary">Next →</button>
+        </div>
+    </div>
+
+    <!-- Note: ThemeToggle and MobileNav now handled by js/components/navbar.js -->
+    <script type="module" src="js/modules/flow-wizard.js?v=0.2.34"></script>
+</body>
+</html>
