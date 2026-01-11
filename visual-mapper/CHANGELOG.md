@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.28
+
+- Fix app icons not loading while in flow wizard (wizard was blocking icon fetch)
+- Allow Play Store icon fetch to continue during wizard (only skip APK extraction)
+- Icons now load while browsing apps in step 2
+
 ## 0.2.27
 
 - Fix browser caching of flow wizard modules (update all import versions)
