@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.19
+
+- Fix navbar text wrapping (white-space: nowrap)
+
+## 0.2.18
+
+- Version alignment
+
 ## 0.2.17
 
 - Auto-start ML server when ml_training_mode is "local"
