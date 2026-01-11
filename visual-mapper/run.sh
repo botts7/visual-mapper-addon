@@ -41,6 +41,29 @@ echo "Starting Visual Mapper..."
 echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 echo "ML Training Mode: ${ML_TRAINING_MODE}"
 
-# Start the server
 cd /app
+
+# Start ML Training Server if mode is "local"
+if [ "$ML_TRAINING_MODE" = "local" ]; then
+    echo "Starting ML Training Server in background..."
+
+    ML_ARGS="--broker $MQTT_BROKER --port $MQTT_PORT"
+
+    if [ -n "$MQTT_USERNAME" ] && [ "$MQTT_USERNAME" != "null" ]; then
+        ML_ARGS="$ML_ARGS --username $MQTT_USERNAME"
+    fi
+    if [ -n "$MQTT_PASSWORD" ] && [ "$MQTT_PASSWORD" != "null" ]; then
+        ML_ARGS="$ML_ARGS --password $MQTT_PASSWORD"
+    fi
+    if [ "$ML_USE_DQN" = "true" ]; then
+        ML_ARGS="$ML_ARGS --dqn"
+    fi
+
+    # Start ML server in background
+    python3 ml_components/ml_training_server.py $ML_ARGS &
+    ML_PID=$!
+    echo "ML Training Server started with PID: $ML_PID"
+fi
+
+# Start the main server
 exec python3 main.py

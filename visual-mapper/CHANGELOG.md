@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.17
+
+- Auto-start ML server when ml_training_mode is "local"
+
 ## 0.2.16
 
 - Add Coral Edge TPU support to Docker container
