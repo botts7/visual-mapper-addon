@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.26
+
+- Fix smart suggestions not showing alternative names (module cache bust)
+- Add icon prefetch when flow wizard step 2 loads
+- Fix screens dropdown text clipping in step 3
+
 ## 0.2.25
 
 - Fix ML Training Server not starting (add paho-mqtt 1.6.1 dependency)
