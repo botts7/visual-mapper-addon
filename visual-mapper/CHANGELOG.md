@@ -2,7 +2,9 @@
 
 ## 0.2.25
 
-- Fix ML Training Server not starting (missing paho-mqtt dependency)
+- Fix ML Training Server not starting (add paho-mqtt 1.6.1 dependency)
+- Fix Set Home Screen not clearing previous home screen
+- Fix element property names for smart suggestions (resource_id, content_desc)
 
 ## 0.2.24
 
