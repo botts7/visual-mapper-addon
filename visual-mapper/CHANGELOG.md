@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.25
+
+- Fix ML Training Server not starting (missing paho-mqtt dependency)
+
 ## 0.2.24
 
 - Fix Learn Navigation duplicate screens issue (hash mismatch)
