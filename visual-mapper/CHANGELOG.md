@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.41
+
+- Consolidate Smart Suggestions to inline tab (removed modal overlay)
+- Smart Suggestions button now switches to Suggestions tab instead of opening modal
+- Added "Also try:" alternative name buttons to inline suggestions
+- Hover over suggestion to highlight element on screenshot
+- Auto-refresh icons when background prefetch completes
+- Auto-refresh app names when background prefetch completes
+- Queue stats polling starts automatically on Step 2 load
+- Centralized version management via utils/version.py
+
+## 0.2.37-0.2.40
+
+- Fix version display issues (centralized APP_VERSION from .build-version)
+- Remove hardcoded versions from main.py, health.py, performance.py, mqtt_manager.py
+- Fix frontend/backend sync between repos
+- Docker cache busting improvements
+
+## 0.2.36
+
+- Version sync fixes
+- Module import cache busting updates
+
 ## 0.2.35
 
 - MAJOR: Embed code directly in addon repo (no more git clone during build)
