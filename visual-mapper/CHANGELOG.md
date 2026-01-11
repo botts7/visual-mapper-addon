@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.14
+
+- Add MQTT username/password arguments to ML server
+
 ## 0.2.13
 
 - Fix feature_manager None check in ML imports
