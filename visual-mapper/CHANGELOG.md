@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.27
+
+- Fix browser caching of flow wizard modules (update all import versions)
+- Ensures "Also try" alternatives and hover highlights load correctly
+
 ## 0.2.26
 
 - Fix smart suggestions not showing alternative names (module cache bust)
