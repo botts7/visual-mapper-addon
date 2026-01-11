@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.13
+
+- Fix feature_manager None check in ML imports
+
 ## 0.2.12
 
 - Fix ML server standalone mode (feature_manager import optional)
