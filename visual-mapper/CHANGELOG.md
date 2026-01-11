@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.31
+
+- Update ALL JS module imports for complete cache bust
+- Pre-commit hook now auto-updates all ?v= params
+- Fixes "Also try" alternatives and hover highlight features
+
 ## 0.2.30
 
 - Add missing hover-highlight CSS for smart suggestions
