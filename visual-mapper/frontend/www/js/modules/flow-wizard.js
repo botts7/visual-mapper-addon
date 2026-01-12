@@ -93,7 +93,7 @@ class FlowWizard {
         // Live streaming (Phase 1 enhancement)
         this.captureMode = 'polling'; // 'polling' or 'streaming'
         this.streamMode = 'mjpeg'; // 'mjpeg' or 'websocket'
-        this.streamQuality = 'medium'; // 'high', 'medium', 'low', 'fast'
+        this.streamQuality = 'fast'; // 'high', 'medium', 'low', 'fast' - default 'fast' for WiFi compatibility
         this.liveStream = null;
 
         // Gesture recording (Phase 4 enhancement)
