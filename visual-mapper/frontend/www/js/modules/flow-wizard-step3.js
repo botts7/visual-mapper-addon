@@ -2073,12 +2073,9 @@ export function startElementAutoRefresh(wizard) {
                 refreshElements(wizard);
             }
         };
-        // IMMEDIATE CLEAR: When screen changes, clear wizard's tracked elements immediately
-        // This prevents stale element overlays on new screenshot before refreshElements completes
-        wizard.liveStream.onElementsCleared = () => {
-            console.log('[FlowWizard] Screen change detected - clearing wizard elements');
-            clearAllElementsAndHover(wizard);
-        };
+        // Note: onElementsCleared callback removed - was causing element flicker
+        // LiveStream's autoHideStaleElements now handles not drawing stale overlays
+        // and new elements replace old ones atomically in refreshElements
     } else {
         console.warn('[FlowWizard] No liveStream - smart refresh not available');
     }
@@ -2277,8 +2274,7 @@ export async function refreshElements(wizard) {
                 currentActivity = data.current_activity;
             }
 
-            // CRITICAL: Detect app/screen change and clear stale elements immediately
-            // This prevents old screen's elements from being shown on new screen's video
+            // Detect app/screen change for logging (staleness handled by LiveStream)
             const packageChanged = currentPackage && wizard.currentElementsPackage &&
                 currentPackage !== wizard.currentElementsPackage;
             const activityChanged = currentActivity && wizard.currentElementsActivity &&
@@ -2288,16 +2284,13 @@ export async function refreshElements(wizard) {
                 const changeType = packageChanged ? 'App' : 'Screen';
                 const from = packageChanged ? wizard.currentElementsPackage : wizard.currentElementsActivity;
                 const to = packageChanged ? currentPackage : currentActivity;
-                console.log(`[FlowWizard] ${changeType} changed: ${from} → ${to}, clearing stale elements`);
-
-                // Clear ALL element sources and hover state (unified helper)
-                clearAllElementsAndHover(wizard);
-
-                // Force immediate redraw without old overlays
-                if (wizard.liveStream?.currentImage) {
-                    wizard.liveStream.ctx.clearRect(0, 0, wizard.liveStream.canvas.width, wizard.liveStream.canvas.height);
-                    wizard.liveStream.ctx.drawImage(wizard.liveStream.currentImage, 0, 0);
-                }
+                console.log(`[FlowWizard] ${changeType} changed: ${from} → ${to}`);
+                // NOTE: Don't clear elements here - LiveStream's autoHideStaleElements handles
+                // not drawing stale overlays. New elements will replace old ones atomically
+                // below at _renderFrame call. This prevents show->hide->show flicker.
+                // Just clear hover state since element coordinates won't match new screen
+                clearHoverHighlight(wizard);
+                wizard.hoveredElement = null;
             }
             // Track current package and activity for next comparison
             wizard.currentElementsPackage = currentPackage;
