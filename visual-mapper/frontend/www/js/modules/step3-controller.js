@@ -148,8 +148,8 @@ export async function setupStreamingMode(wizard, onFrame, onConnect, onError) {
 export async function switchCaptureMode(wizard, mode) {
     console.log(`[Step3Controller] Switching to ${mode} mode`);
 
-    // Stop current mode
-    StreamManager.stopStreaming(wizard);
+    // Stop current mode - must await to prevent race conditions
+    await StreamManager.stopStreaming(wizard);
     StreamManager.stopElementAutoRefresh(wizard);
 
     wizard.captureMode = mode;

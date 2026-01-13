@@ -198,6 +198,10 @@ function setSetupStatusReady(wizard, message = 'Ready to record') {
     wizard._setupStatusTimeout = setTimeout(() => {
         const statusEl = document.getElementById('step3SetupStatus');
         if (statusEl) statusEl.classList.add('hidden');
+        // Recalculate canvas zoom after container height changes
+        if (wizard.canvasRenderer) {
+            requestAnimationFrame(() => wizard.canvasRenderer.applyZoom());
+        }
     }, 1500);
 }
 
@@ -1560,7 +1564,7 @@ export function setupCaptureMode(wizard) {
 /**
  * Set capture mode (polling or streaming)
  */
-export function setCaptureMode(wizard, mode) {
+export async function setCaptureMode(wizard, mode) {
     const streamModeSelect = document.getElementById('streamMode');
     const qualitySelect = document.getElementById('streamQuality');
 
@@ -1614,7 +1618,7 @@ export function setCaptureMode(wizard, mode) {
             stitchBtn.title = 'Full Page Capture';
         }
 
-        stopStreaming(wizard);
+        await stopStreaming(wizard);
     }
 
     console.log(`[FlowWizard] Capture mode: ${mode}`);
@@ -1848,8 +1852,8 @@ export async function startStreaming(wizard) {
     // NOTE: Removed duplicate refreshElements call here - onConnect already calls it
     // This prevents race conditions and duplicate API calls
 
-    // Stop any existing stream
-    stopStreaming(wizard);
+    // Stop any existing stream - MUST await to prevent WebSocket race condition
+    await stopStreaming(wizard);
 
     // Always create a fresh LiveStream to ensure it's bound to current canvas
     // Previous bug: reusing old LiveStream that was bound to stale canvas element
@@ -1995,8 +1999,9 @@ export async function startStreaming(wizard) {
 
 /**
  * Stop live streaming
+ * IMPORTANT: This is async - must be awaited to prevent race conditions with start
  */
-export function stopStreaming(wizard) {
+export async function stopStreaming(wizard) {
     // Stop element auto-refresh
     stopElementAutoRefresh(wizard);
 
@@ -2009,9 +2014,9 @@ export function stopStreaming(wizard) {
         wizard._streamLoadingTimeout = null;
     }
 
-    // Stop LiveStream if active
+    // Stop LiveStream if active - MUST await to prevent race condition
     if (wizard.liveStream) {
-        wizard.liveStream.stop();
+        await wizard.liveStream.stop();
     }
 
     updateStreamStatus(wizard, '', '');
@@ -2021,7 +2026,7 @@ export function stopStreaming(wizard) {
  * Reconnect the stream (stop and restart)
  * Resets slow connection warning flag
  */
-export function reconnectStream(wizard) {
+export async function reconnectStream(wizard) {
     if (wizard.captureMode !== 'streaming') {
         showToast('Not in streaming mode', 'info', 2000);
         return;
@@ -2032,13 +2037,14 @@ export function reconnectStream(wizard) {
     // Reset slow connection warning
     wizard._slowConnectionWarned = false;
 
-    // Stop and restart the stream
-    stopStreaming(wizard);
+    // Stop the stream and wait for it to fully stop
+    await stopStreaming(wizard);
 
-    // Small delay before reconnecting
-    setTimeout(() => {
-        startStreaming(wizard);
-    }, 500);
+    // Small delay before reconnecting to ensure WebSocket is fully closed
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Start the new stream
+    await startStreaming(wizard);
 }
 
 /**
