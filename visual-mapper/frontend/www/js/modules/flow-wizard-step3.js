@@ -2189,11 +2189,19 @@ export async function refreshElements(wizard) {
     }
     wizard._refreshingElements = true;
 
+    // Show refresh indicator to give user feedback
+    const refreshIndicator = document.getElementById('elementsRefreshIndicator');
+    if (refreshIndicator) {
+        refreshIndicator.classList.remove('hidden');
+    }
+
     // Safety net: auto-reset guard after 15 seconds in case of hung API call
     const guardTimeout = setTimeout(() => {
         if (wizard._refreshingElements) {
             console.warn('[FlowWizard] refreshElements guard timeout - resetting');
             wizard._refreshingElements = false;
+            // Hide indicator on timeout
+            if (refreshIndicator) refreshIndicator.classList.add('hidden');
         }
     }, 15000);
 
@@ -2384,13 +2392,18 @@ export async function refreshElements(wizard) {
                     height: wizard.recorder.screenshotMetadata?.height,
                     quick: false
                 };
-                // Update the display with the fresh screenshot (fixes screenshot/element mismatch)
-                updateScreenshotDisplay(wizard);
+                // Update the display with the fresh screenshot - MUST await to ensure
+                // new screenshot is loaded before any element overlays are drawn
+                // This fixes the bug where old screenshot would show with new elements
+                await updateScreenshotDisplay(wizard);
             }
+            // Polling mode uses canvasRenderer.render() which handles both screenshot
+            // and element overlays, so no need to update liveStream separately
         }
 
-        // Update LiveStream elements for overlay (batched - single redraw)
-        if (wizard.liveStream) {
+        // Only in streaming mode: Update LiveStream elements for overlay (batched - single redraw)
+        // In polling mode, canvasRenderer.render() already handles this
+        if (wizard.captureMode === 'streaming' && wizard.liveStream) {
             // Set new elements and redraw in one operation (no intermediate states)
             wizard.liveStream.elements = elements;
 
@@ -2443,6 +2456,12 @@ export async function refreshElements(wizard) {
         // Clear the safety timeout and reset guard
         clearTimeout(guardTimeout);
         wizard._refreshingElements = false;
+
+        // Hide refresh indicator
+        const refreshIndicator = document.getElementById('elementsRefreshIndicator');
+        if (refreshIndicator) {
+            refreshIndicator.classList.add('hidden');
+        }
     }
 }
 
