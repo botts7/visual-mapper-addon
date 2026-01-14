@@ -70,7 +70,7 @@ jobs:
         if: steps.check.outputs.changed == 'true'
         id: version
         run: |
-          VERSION=$(grep 'version:' visual-mapper/config.yaml | sed 's/version: *"\(.*\)"/\1/')
+          VERSION=$(grep '^version:' visual-mapper/config.yaml | head -1 | sed 's/version: *//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building STABLE version: $VERSION"
 
@@ -152,7 +152,7 @@ jobs:
         if: steps.check.outputs.changed == 'true'
         id: version
         run: |
-          VERSION=$(grep 'version:' visual-mapper-beta/config.yaml | sed 's/version: *"\(.*\)"/\1/')
+          VERSION=$(grep '^version:' visual-mapper-beta/config.yaml | head -1 | sed 's/version: *//; s/"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building BETA version: $VERSION"
 
