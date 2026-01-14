@@ -52,6 +52,17 @@ echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 echo "ML Training Mode: ${ML_TRAINING_MODE}"
 echo "Server Port: ${PORT}"
 
+# Kill any orphaned Python processes that might be holding the port
+# This can happen if the container was not cleanly stopped
+echo "Checking for orphaned processes on port ${PORT}..."
+if command -v fuser &> /dev/null; then
+    fuser -k ${PORT}/tcp 2>/dev/null || true
+elif command -v lsof &> /dev/null; then
+    lsof -ti:${PORT} | xargs -r kill -9 2>/dev/null || true
+fi
+# Give time for port to be released
+sleep 1
+
 cd /app
 
 # Start ML Training Server if mode is "local"
