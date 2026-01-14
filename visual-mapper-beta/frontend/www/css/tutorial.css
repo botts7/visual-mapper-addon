@@ -1,57 +1,34 @@
 /**
  * Tutorial Overlay Styles
- * Interactive step-by-step guide with spotlight highlighting
+ * Non-blocking guided walkthrough with event-based progression
  */
 
-/* Main overlay that darkens the background */
+/* Main overlay that darkens the background - ALWAYS non-blocking */
 .tutorial-overlay {
     position: fixed;
     inset: 0;
     z-index: 9998;
-    pointer-events: none;
+    pointer-events: none;  /* Never blocks user interaction */
     opacity: 0;
     transition: opacity 0.3s ease;
 }
 
 .tutorial-overlay.active {
     opacity: 1;
-    pointer-events: auto;
+    /* NO pointer-events: auto - overlay is purely visual */
 }
 
-/* Spotlight element that highlights the target */
+/* Spotlight element - purely visual highlight */
 .tutorial-spotlight {
     position: absolute;
-    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.75);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
     border-radius: 8px;
     z-index: 9999;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-    /* Allow clicks to pass through to the element underneath */
-    cursor: pointer;
+    pointer-events: none;  /* Never blocks - clicks pass through */
 }
 
-/* Interactive mode - allows clicking the highlighted element */
-.tutorial-overlay.interactive .tutorial-spotlight {
-    pointer-events: auto;
-}
-
-/* Visual hint that element is clickable */
-.tutorial-overlay.interactive .tutorial-spotlight::after {
-    content: 'Click to try';
-    position: absolute;
-    bottom: -28px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--primary-color, #2196F3);
-    color: white;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-/* Pulse animation for the spotlight */
+/* Pulse animation for the spotlight border */
 .tutorial-spotlight::before {
     content: '';
     position: absolute;
@@ -66,10 +43,31 @@
     50% { opacity: 0.5; transform: scale(1.02); }
 }
 
-/* Tooltip container */
+/* Target highlight class - applied directly to elements */
+.tutorial-target {
+    position: relative;
+    z-index: 10000 !important;
+    outline: 3px solid var(--primary-color, #2196F3) !important;
+    outline-offset: 4px !important;
+    animation: target-pulse 2s ease-in-out infinite;
+    border-radius: 4px;
+}
+
+@keyframes target-pulse {
+    0%, 100% {
+        outline-color: var(--primary-color, #2196F3);
+        box-shadow: 0 0 0 4px rgba(33, 150, 243, 0.2);
+    }
+    50% {
+        outline-color: var(--primary-hover, #1976D2);
+        box-shadow: 0 0 0 8px rgba(33, 150, 243, 0.1);
+    }
+}
+
+/* Tooltip container - ONLY interactive element */
 .tutorial-tooltip {
     position: absolute;
-    z-index: 10000;
+    z-index: 10001;
     background: var(--card-background, #ffffff);
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
@@ -79,7 +77,7 @@
     opacity: 0;
     transform: translateY(10px);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: auto;
+    pointer-events: auto;  /* Only tooltip accepts clicks */
 }
 
 .tutorial-tooltip.visible {
@@ -196,6 +194,63 @@ body.dark-mode .tutorial-close:hover {
     border: 1px solid var(--border-color, #ddd);
 }
 
+/* Success message shown when step auto-completes */
+.tutorial-success {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid var(--secondary-color, #4CAF50);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    color: var(--secondary-color, #4CAF50);
+    font-weight: 500;
+    font-size: 14px;
+    animation: success-appear 0.3s ease;
+}
+
+.tutorial-success-icon {
+    font-size: 18px;
+}
+
+@keyframes success-appear {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Waiting indicator shown while waiting for action */
+.tutorial-waiting {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(33, 150, 243, 0.1);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    color: var(--primary-color, #2196F3);
+    font-size: 13px;
+}
+
+.tutorial-waiting-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(33, 150, 243, 0.3);
+    border-top-color: var(--primary-color, #2196F3);
+    border-radius: 50%;
+    animation: spinner 0.8s linear infinite;
+}
+
+@keyframes spinner {
+    to { transform: rotate(360deg); }
+}
+
 /* Tooltip navigation */
 .tutorial-nav {
     display: flex;
@@ -297,6 +352,7 @@ body.dark-mode .tutorial-btn-secondary:hover {
     max-width: 480px;
     width: 90%;
     text-align: center;
+    pointer-events: auto;  /* Modal is interactive */
 }
 
 body.dark-mode .tutorial-welcome {
