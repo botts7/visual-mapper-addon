@@ -25,12 +25,30 @@ env:
   OWNER: ${{ github.repository_owner }}
 
 jobs:
+  # Detect which folders changed
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.filter.outputs.stable }}
+      beta: ${{ steps.filter.outputs.beta }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            stable:
+              - 'visual-mapper/**'
+            beta:
+              - 'visual-mapper-beta/**'
+
   # Stable build - visual-mapper/
   build-stable:
+    needs: detect-changes
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && (github.event.inputs.build_target == 'stable' || github.event.inputs.build_target == 'both') ||
-      github.event_name == 'push'
+      (github.event_name == 'push' && needs.detect-changes.outputs.stable == 'true')
     permissions:
       contents: read
       packages: write
@@ -88,10 +106,11 @@ jobs:
 
   # Beta build - visual-mapper-beta/
   build-beta:
+    needs: detect-changes
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && (github.event.inputs.build_target == 'beta' || github.event.inputs.build_target == 'both') ||
-      github.event_name == 'push'
+      (github.event_name == 'push' && needs.detect-changes.outputs.beta == 'true')
     permissions:
       contents: read
       packages: write
