@@ -44,12 +44,13 @@ mkdir -p "$DATA_DIR/ml"
 echo "Using beta data directory: $DATA_DIR"
 
 # Use port 8081 for beta (to allow running alongside stable on 8080)
-export SERVER_PORT=8081
+# main.py reads PORT environment variable
+export PORT=8081
 
 echo "Starting Visual Mapper BETA..."
 echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 echo "ML Training Mode: ${ML_TRAINING_MODE}"
-echo "Server Port: ${SERVER_PORT}"
+echo "Server Port: ${PORT}"
 
 cd /app
 
@@ -75,5 +76,5 @@ if [ "$ML_TRAINING_MODE" = "local" ]; then
     echo "ML Training Server started with PID: $ML_PID"
 fi
 
-# Start the main server on beta port
-exec python3 main.py --port $SERVER_PORT
+# Start the main server (PORT env var is already set to 8081)
+exec python3 main.py
