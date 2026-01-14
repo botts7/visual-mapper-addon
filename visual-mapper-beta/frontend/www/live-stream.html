@@ -1,0 +1,2425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.3.1" data-build="2026-01-10">
+    <title>Live Stream - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/styles.css?v=0.3.1">
+    <link rel="stylesheet" href="css/live-stream.css?v=0.3.1">
+    <style>
+        /* Compact controls styling */
+        .stream-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 0;
+        }
+        .stream-header h1 { margin: 0; }
+        .stream-header p { margin: 5px 0 0 0; color: var(--text-secondary); font-size: 13px; }
+        .controls-card {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .controls-card h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            color: var(--text-color);
+        }
+        .compact-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .compact-row:last-child { margin-bottom: 0; }
+        .compact-row label {
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .compact-row select {
+            padding: 6px 10px;
+            font-size: 13px;
+            min-width: 140px;
+        }
+        .filter-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-row label {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+        .two-col-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        @media (max-width: 900px) {
+            .two-col-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.3.1"></script>
+
+    <div class="container">
+        <!-- Compact Header -->
+        <div class="card" style="margin-bottom: 15px;">
+            <div class="stream-header">
+                <div>
+                    <h1>Live Stream</h1>
+                    <p>Real-time screen streaming with element overlays</p>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="deviceSelect" style="min-width: 180px; padding: 8px;">
+                        <option value="">-- Select Device --</option>
+                    </select>
+                    <button id="startBtn" class="btn btn-primary">Start</button>
+                    <button id="stopBtn" class="btn btn-secondary" disabled>Stop</button>
+                    <button id="refreshDevicesBtn" class="btn btn-secondary btn-sm" title="Refresh devices">↻</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stream Settings Row -->
+        <div class="two-col-grid">
+            <div class="controls-card">
+                <h3>Stream Settings</h3>
+                <div class="compact-row">
+                    <label>Mode:
+                        <select id="streamMode">
+                            <option value="mjpeg" selected>MJPEG Binary</option>
+                            <option value="mjpeg-v2">MJPEG v2</option>
+                            <option value="websocket">WebSocket</option>
+                        </select>
+                    </label>
+                    <label>Quality:
+                        <select id="streamQuality">
+                            <option value="high">Native ~5fps</option>
+                            <option value="medium" selected>720p ~12fps</option>
+                            <option value="low">480p ~18fps</option>
+                            <option value="fast">360p ~25fps</option>
+                            <option value="ultrafast">240p ~30fps</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="compact-row">
+                    <label><input type="checkbox" id="showOverlays" checked> Show Overlays</label>
+                    <label><input type="checkbox" id="showLabels" checked> Show Labels</label>
+                </div>
+            </div>
+
+            <div class="controls-card">
+                <h3>Element Overlays</h3>
+                <div class="compact-row">
+                    <button id="refreshElementsBtn" class="btn btn-secondary btn-sm">Refresh Elements</button>
+                    <label><input type="checkbox" id="autoRefreshElements"> Auto</label>
+                    <select id="autoRefreshInterval" style="width: 70px; padding: 4px;">
+                        <option value="2000">2s</option>
+                        <option value="5000" selected>5s</option>
+                        <option value="10000">10s</option>
+                    </select>
+                    <span id="elementStatus" style="font-size: 12px; color: var(--text-secondary);">No elements</span>
+                </div>
+                <div class="filter-row">
+                    <label><input type="checkbox" id="filterClickable"> Clickable</label>
+                    <label><input type="checkbox" id="filterWithText"> With Text</label>
+                    <label><input type="checkbox" id="filterLargeElements" checked> Hide Small</label>
+                    <label><input type="checkbox" id="filterContainers" checked> Hide Containers</label>
+                    <label><input type="checkbox" id="filterDividers" checked> Hide Dividers</label>
+                    <label><input type="checkbox" id="filterEmpty" checked> Hide Empty</label>
+                </div>
+                <div class="compact-row" style="margin-top: 8px;">
+                    <label style="font-size: 11px;"><input type="checkbox" id="autoHideStale"> Auto-hide on screen change</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" id="selectedElementCard" style="display: none;">
+            <h2>Selected Element</h2>
+            <div class="element-details">
+                <div class="detail-row">
+                    <span class="detail-label">Class:</span>
+                    <span id="elClass" class="detail-value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Text:</span>
+                    <span id="elText" class="detail-value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Resource ID:</span>
+                    <span id="elResourceId" class="detail-value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Content Desc:</span>
+                    <span id="elContentDesc" class="detail-value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Bounds:</span>
+                    <span id="elBounds" class="detail-value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Clickable:</span>
+                    <span id="elClickable" class="detail-value">-</span>
+                </div>
+            </div>
+            <div class="controls-row" style="margin-top: 15px;">
+                <button id="createActionBtn" class="btn btn-primary">Create Action</button>
+                <button id="clearSelectionBtn" class="btn btn-secondary">Clear Selection</button>
+            </div>
+        </div>
+
+        <!-- Create Action Dialog -->
+        <div id="createActionDialog" class="modal-overlay" style="display: none;">
+            <div class="modal-content">
+                <h2>Create Action</h2>
+                <div class="form-group">
+                    <label for="actionName">Action Name:</label>
+                    <input type="text" id="actionName" class="form-control" placeholder="Enter action name">
+                </div>
+                <div class="form-group">
+                    <label for="actionDescription">Description:</label>
+                    <input type="text" id="actionDescription" class="form-control" placeholder="Optional description">
+                </div>
+                <div class="form-group">
+                    <label for="actionType">Action Type:</label>
+                    <select id="actionType" class="form-control">
+                        <option value="tap">Tap</option>
+                        <option value="swipe">Swipe</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Coordinates:</label>
+                    <div class="coords-display">
+                        <span>X: <input type="number" id="actionX" class="form-control-sm" style="width: 80px;"></span>
+                        <span>Y: <input type="number" id="actionY" class="form-control-sm" style="width: 80px;"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="actionTags">Tags (comma-separated):</label>
+                    <input type="text" id="actionTags" class="form-control" placeholder="e.g., navigation, control">
+                </div>
+                <div class="modal-info" id="actionElementInfo"></div>
+                <div class="modal-buttons">
+                    <button id="saveActionBtn" class="btn btn-primary">Save Action</button>
+                    <button id="cancelActionBtn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Performance Metrics</h2>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <span class="metric-label">Status:</span>
+                    <span id="statusValue" class="metric-value status-disconnected">Disconnected</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">FPS:</span>
+                    <span id="fpsValue" class="metric-value">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Latency:</span>
+                    <span id="latencyValue" class="metric-value">0 ms</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Capture Time:</span>
+                    <span id="captureValue" class="metric-value">0 ms</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Frames:</span>
+                    <span id="frameValue" class="metric-value">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Elements:</span>
+                    <span id="elementsValue" class="metric-value">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Bandwidth:</span>
+                    <span id="bandwidthValue" class="metric-value">0 KB/s</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Mode:</span>
+                    <span id="streamModeValue" class="metric-value">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Connection:</span>
+                    <span id="connectionTypeValue" class="metric-value">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Backend:</span>
+                    <span id="captureBackendValue" class="metric-value">--</span>
+                </div>
+            </div>
+            <!-- FPS Performance Hint -->
+            <div id="fpsHint" class="fps-hint" style="display: none;">
+                <span id="fpsHintText"></span>
+            </div>
+        </div>
+
+        <div class="card stream-card">
+            <h2>Stream View</h2>
+
+            <!-- Quick Actions Bar -->
+            <div id="quickActionsBar" class="quick-actions-bar">
+                <button class="quick-btn" id="qabRefresh" title="Refresh Elements">
+                    <span class="quick-icon">↻</span>
+                </button>
+                <button class="quick-btn" id="qabBack" title="Back">
+                    <span class="quick-icon">←</span>
+                </button>
+                <button class="quick-btn" id="qabHome" title="Home">
+                    <span class="quick-icon">●</span>
+                </button>
+                <button class="quick-btn" id="qabRecent" title="Recent Apps">
+                    <span class="quick-icon">▢</span>
+                </button>
+                <div class="quick-divider"></div>
+                <button class="quick-btn" id="qabZoomIn" title="Zoom In">
+                    <span class="quick-icon">+</span>
+                </button>
+                <button class="quick-btn" id="qabZoomOut" title="Zoom Out">
+                    <span class="quick-icon">−</span>
+                </button>
+                <button class="quick-btn" id="qabZoomReset" title="Reset Zoom (1:1)">
+                    <span class="quick-icon">1:1</span>
+                </button>
+                <span id="zoomLevel" class="zoom-level">100%</span>
+                <div class="quick-divider"></div>
+                <span id="connectionStatus" class="connection-status disconnected" title="Connection Status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Disconnected</span>
+                </span>
+                <div class="quick-divider"></div>
+                <button class="quick-btn" id="qabScreenshot" title="Save Screenshot">
+                    <span class="quick-icon">📷</span>
+                </button>
+                <button class="quick-btn" id="qabFullscreen" title="Toggle Fullscreen">
+                    <span class="quick-icon">⛶</span>
+                </button>
+                <button class="quick-btn" id="qabSplitView" title="Toggle Split View">
+                    <span class="quick-icon">◫</span>
+                </button>
+            </div>
+
+            <div id="splitViewContainer" class="split-view-container">
+                <div id="canvasContainer" class="canvas-container">
+                    <canvas id="streamCanvas"></canvas>
+                    <div id="tapIndicator" class="tap-indicator" style="display: none;"></div>
+                    <div id="swipePathContainer" class="swipe-path" style="display: none;"></div>
+                    <div id="hoverTooltip" class="hover-tooltip" style="display: none;">
+                        <div class="tooltip-header"></div>
+                        <div class="tooltip-body"></div>
+                    </div>
+                    <div id="noStream" class="no-stream-overlay">
+                        <p>Select a device and click "Start Stream"</p>
+                    </div>
+                </div>
+
+                <!-- Element Tree Panel (Split View) -->
+                <div id="elementTreePanel" class="element-tree-panel" style="display: none;">
+                    <div class="tree-header">
+                        <h3>Element Tree</h3>
+                        <input type="text" id="treeSearch" class="tree-search" placeholder="Search elements...">
+                    </div>
+                    <div id="elementTreeContent" class="tree-content">
+                        <p class="tree-empty">Click "Refresh Elements" to load</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Controls Grid -->
+        <div class="two-col-grid" style="margin-top: 15px;">
+            <div class="controls-card">
+                <h3>Navigation & Touch</h3>
+                <p style="font-size: 12px; color: var(--text-secondary); margin: 0 0 10px 0;">
+                    Click = Tap | Drag = Swipe | Ctrl+Scroll = Zoom
+                </p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                    <button id="btnBack" class="btn btn-secondary btn-sm">← Back</button>
+                    <button id="btnHome" class="btn btn-secondary btn-sm">● Home</button>
+                    <button id="btnRecent" class="btn btn-secondary btn-sm">▢ Recent</button>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button id="btnSwipeUp" class="btn btn-secondary btn-sm">↑ Up</button>
+                    <button id="btnSwipeDown" class="btn btn-secondary btn-sm">↓ Down</button>
+                    <button id="btnSwipeLeft" class="btn btn-secondary btn-sm">← Left</button>
+                    <button id="btnSwipeRight" class="btn btn-secondary btn-sm">→ Right</button>
+                </div>
+                <div id="lastTap" class="tap-info" style="margin-top: 10px; font-size: 12px;">Last: --</div>
+                <div id="lastAction" class="tap-info" style="font-size: 12px;">Action: --</div>
+            </div>
+
+            <div class="controls-card">
+                <h3>Gesture Recording</h3>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                    <button id="recordBtn" class="btn btn-record">● Record</button>
+                    <button id="clearRecordingBtn" class="btn btn-secondary btn-sm" disabled>Clear</button>
+                    <button id="saveRecordingBtn" class="btn btn-primary btn-sm" disabled>Save Flow</button>
+                </div>
+                <div id="recordingStatus" class="recording-status" style="margin-bottom: 8px;">
+                    <span id="recordingIndicator" class="recording-indicator"></span>
+                    <span id="recordingText" style="font-size: 12px;">Not recording</span>
+                </div>
+                <div id="recordedActions" class="recorded-actions" style="max-height: 120px; overflow-y: auto;">
+                    <p class="empty-message" style="font-size: 12px; margin: 0;">No actions recorded</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause Options Dialog -->
+    <div id="pauseOptionsDialog" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 450px;">
+            <h3 style="margin-top: 0;">⚡ Streaming Performance</h3>
+            <p style="color: #666; margin-bottom: 20px;">
+                Pausing background tasks improves streaming performance by reducing ADB contention.
+            </p>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="pauseSchedulerCheck" checked>
+                    <span><strong>Pause Flow Scheduler</strong><br><small style="color: #888;">Stop automated flows during streaming</small></span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="pauseSensorsCheck" checked>
+                    <span><strong>Pause Sensor Updates</strong><br><small style="color: #888;">Stop sensor polling during streaming</small></span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="rememberPauseChoice">
+                    <span>Remember my choice</span>
+                </label>
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="pauseDialogCancel" class="btn btn-secondary">Cancel</button>
+                <button id="pauseDialogStart" class="btn btn-primary">Start Streaming</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import LiveStream from './js/modules/live-stream.js?v=0.2.81';
+        import ActionManager from './js/modules/action-manager.js?v=0.2.81';
+
+        // API helper
+        function getApiBase() {
+            const url = window.location.href;
+            const ingressMatch = url.match(/\/api\/hassio_ingress\/[^\/]+/);
+            if (ingressMatch) {
+                return ingressMatch[0] + '/api';
+            }
+            return '/api';
+        }
+
+        async function apiGet(endpoint) {
+            const response = await fetch(getApiBase() + endpoint);
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+            return response.json();
+        }
+
+        async function apiPost(endpoint, data) {
+            const response = await fetch(getApiBase() + endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+            return response.json();
+        }
+
+        // API client wrapper for ActionManager
+        const apiClient = {
+            get: async (endpoint) => {
+                const response = await fetch(getApiBase() + endpoint);
+                if (!response.ok) throw new Error(`API error: ${response.status}`);
+                return response.json();
+            },
+            post: async (endpoint, data) => apiPost(endpoint, data),
+            put: async (endpoint, data) => {
+                const response = await fetch(getApiBase() + endpoint, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (!response.ok) throw new Error(`API error: ${response.status}`);
+                return response.json();
+            },
+            delete: async (endpoint) => {
+                const response = await fetch(getApiBase() + endpoint, { method: 'DELETE' });
+                if (!response.ok) throw new Error(`API error: ${response.status}`);
+                return response.json();
+            }
+        };
+
+        // Initialize ActionManager
+        const actionManager = new ActionManager(apiClient);
+
+        // DOM elements
+        const deviceSelect = document.getElementById('deviceSelect');
+        const streamModeSelect = document.getElementById('streamMode');
+        const streamQualitySelect = document.getElementById('streamQuality');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const refreshDevicesBtn = document.getElementById('refreshDevicesBtn');
+        const showOverlays = document.getElementById('showOverlays');
+        const showLabels = document.getElementById('showLabels');
+        const canvas = document.getElementById('streamCanvas');
+        const noStream = document.getElementById('noStream');
+        const lastTapDiv = document.getElementById('lastTap');
+
+        // New metric elements
+        const bandwidthValue = document.getElementById('bandwidthValue');
+        const streamModeValue = document.getElementById('streamModeValue');
+
+        // Element overlay controls
+        const refreshElementsBtn = document.getElementById('refreshElementsBtn');
+        const elementStatus = document.getElementById('elementStatus');
+        const filterClickable = document.getElementById('filterClickable');
+        const filterWithText = document.getElementById('filterWithText');
+        const filterLargeElements = document.getElementById('filterLargeElements');
+        const filterContainers = document.getElementById('filterContainers');
+        const filterDividers = document.getElementById('filterDividers');
+        const filterEmpty = document.getElementById('filterEmpty');
+
+        // Container classes to filter out (matches live-stream.js)
+        // Use Set for O(1) exact match lookup
+        const containerClasses = new Set([
+            'android.view.View', 'android.view.ViewGroup',
+            'android.widget.FrameLayout', 'android.widget.LinearLayout',
+            'android.widget.RelativeLayout', 'android.widget.ScrollView',
+            'androidx.constraintlayout.widget.ConstraintLayout',
+            'androidx.recyclerview.widget.RecyclerView',
+            'androidx.coordinatorlayout.widget.CoordinatorLayout',
+            'androidx.core.widget.NestedScrollView'
+        ]);
+
+        // Divider classes to filter out
+        const dividerClasses = [
+            'android.widget.Space', 'android.view.View'
+        ];
+
+        // Selected element controls
+        const selectedElementCard = document.getElementById('selectedElementCard');
+        const createActionBtn = document.getElementById('createActionBtn');
+        const clearSelectionBtn = document.getElementById('clearSelectionBtn');
+
+        // State for element selection
+        let allElements = [];
+        let filteredElements = [];
+        let selectedElement = null;
+        let autoRefreshTimer = null;
+
+        // Auto-refresh controls
+        const autoRefreshElements = document.getElementById('autoRefreshElements');
+        const autoRefreshInterval = document.getElementById('autoRefreshInterval');
+
+        // Metric elements
+        const statusValue = document.getElementById('statusValue');
+        const fpsValue = document.getElementById('fpsValue');
+        const latencyValue = document.getElementById('latencyValue');
+        const captureValue = document.getElementById('captureValue');
+        const frameValue = document.getElementById('frameValue');
+        const elementsValue = document.getElementById('elementsValue');
+        const connectionTypeValue = document.getElementById('connectionTypeValue');
+        const captureBackendValue = document.getElementById('captureBackendValue');
+        const fpsHint = document.getElementById('fpsHint');
+        const fpsHintText = document.getElementById('fpsHintText');
+
+        // Device info cache (connection type per device)
+        let deviceInfoCache = {};
+
+        // Initialize LiveStream
+        const liveStream = new LiveStream(canvas);
+
+        // Callbacks
+        liveStream.onConnect = () => {
+            statusValue.textContent = 'Connected';
+            statusValue.className = 'metric-value status-connected';
+            noStream.style.display = 'none';
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+        };
+
+        liveStream.onDisconnect = () => {
+            statusValue.textContent = 'Disconnected';
+            statusValue.className = 'metric-value status-disconnected';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            streamModeValue.textContent = '--';
+            bandwidthValue.textContent = '0 KB/s';
+            stopAutoRefresh();
+            autoRefreshElements.checked = false;
+        };
+
+        liveStream.onError = (error) => {
+            statusValue.textContent = 'Error';
+            statusValue.className = 'metric-value status-error';
+            console.error('Stream error:', error);
+            alert('Stream error: ' + error.message);
+        };
+
+        liveStream.onMetricsUpdate = (metrics) => {
+            // Update basic metrics
+            fpsValue.textContent = metrics.fps;
+            latencyValue.textContent = metrics.latency + ' ms';
+            captureValue.textContent = metrics.captureTime + ' ms';
+            frameValue.textContent = metrics.frameCount;
+            bandwidthValue.textContent = metrics.bandwidth + ' KB/s';
+
+            // Color-code FPS based on performance
+            fpsValue.className = 'metric-value';
+            if (metrics.fps >= 15) {
+                fpsValue.classList.add('fps-good');
+            } else if (metrics.fps >= 10) {
+                fpsValue.classList.add('fps-ok');
+            } else if (metrics.fps >= 5) {
+                fpsValue.classList.add('fps-warning');
+            } else if (metrics.fps > 0) {
+                fpsValue.classList.add('fps-slow');
+            }
+
+            // Show FPS performance hint after 20 frames to allow stabilization
+            if (metrics.frameCount > 20) {
+                const deviceId = deviceSelect.value;
+                const deviceInfo = deviceInfoCache[deviceId] || {};
+                const isWifi = deviceInfo.connection_type === 'wifi';
+                const quality = streamQualitySelect.value;
+
+                if (metrics.fps < 3) {
+                    fpsHint.style.display = 'block';
+                    fpsHint.className = 'fps-hint hint-slow';
+                    if (isWifi && quality !== 'ultrafast') {
+                        fpsHintText.textContent = 'Very slow FPS. Try "Ultra-Fast" quality for WiFi connections, or use USB for better performance.';
+                    } else if (isWifi) {
+                        fpsHintText.textContent = 'Very slow FPS on WiFi. Consider connecting via USB for faster streaming.';
+                    } else {
+                        fpsHintText.textContent = 'Very slow FPS. Check device connection and try a lower quality preset.';
+                    }
+                } else if (metrics.fps < 8 && isWifi && quality !== 'ultrafast' && quality !== 'fast') {
+                    fpsHint.style.display = 'block';
+                    fpsHint.className = 'fps-hint hint-warning';
+                    fpsHintText.textContent = 'WiFi connection detected. Try "Fast" or "Ultra-Fast" quality for better FPS.';
+                } else if (metrics.fps >= 15) {
+                    fpsHint.style.display = 'block';
+                    fpsHint.className = 'fps-hint hint-good';
+                    fpsHintText.textContent = 'Excellent streaming performance!';
+                } else {
+                    fpsHint.style.display = 'none';
+                }
+            }
+        };
+
+        liveStream.onFrame = (data) => {
+            if (data.elements && data.elements.length > 0) {
+                elementsValue.textContent = data.elements.length;
+            }
+        };
+
+        // Connection state change handler (for auto-reconnect indicator)
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusText = connectionStatus.querySelector('.status-text');
+
+        liveStream.onConnectionStateChange = (state, attempts) => {
+            // Update indicator classes
+            connectionStatus.className = 'connection-status ' + state;
+
+            // Update text
+            switch (state) {
+                case 'disconnected':
+                    statusText.textContent = 'Disconnected';
+                    break;
+                case 'connecting':
+                    statusText.textContent = 'Connecting...';
+                    break;
+                case 'connected':
+                    statusText.textContent = 'Connected';
+                    break;
+                case 'reconnecting':
+                    statusText.textContent = `Reconnecting (${attempts + 1})`;
+                    break;
+            }
+
+            console.log(`[UI] Connection state: ${state}` + (attempts > 0 ? ` (attempt ${attempts})` : ''));
+        };
+
+        // Load devices (preserves current selection if still available)
+        async function loadDevices() {
+            try {
+                // Preserve current selection
+                const previousSelection = deviceSelect.value;
+
+                const data = await apiGet('/adb/devices');
+                deviceSelect.innerHTML = '<option value="">-- Select Device --</option>';
+
+                // Clear device info cache
+                deviceInfoCache = {};
+
+                let selectionStillValid = false;
+                data.devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.id;
+                    const connType = device.connection_type === 'wifi' ? 'WiFi' : 'USB';
+                    option.textContent = `${device.id} (${device.model || 'Unknown'}) [${connType}]`;
+                    deviceSelect.appendChild(option);
+
+                    // Cache device info including connection type
+                    deviceInfoCache[device.id] = {
+                        model: device.model,
+                        connection_type: device.connection_type || 'unknown'
+                    };
+
+                    // Check if previous selection is still valid
+                    if (device.id === previousSelection) {
+                        selectionStillValid = true;
+                    }
+                });
+
+                // Restore selection if device still exists
+                if (previousSelection && selectionStillValid) {
+                    deviceSelect.value = previousSelection;
+                    console.log(`Loaded ${data.devices.length} devices, restored selection: ${previousSelection}`);
+                } else {
+                    console.log(`Loaded ${data.devices.length} devices`);
+                }
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+                alert('Failed to load devices: ' + error.message);
+            }
+        }
+
+        // Pause options dialog elements
+        const pauseOptionsDialog = document.getElementById('pauseOptionsDialog');
+        const pauseSchedulerCheck = document.getElementById('pauseSchedulerCheck');
+        const pauseSensorsCheck = document.getElementById('pauseSensorsCheck');
+        const rememberPauseChoice = document.getElementById('rememberPauseChoice');
+        const pauseDialogCancel = document.getElementById('pauseDialogCancel');
+        const pauseDialogStart = document.getElementById('pauseDialogStart');
+
+        // Load saved pause preferences
+        const savedPausePrefs = JSON.parse(localStorage.getItem('liveStreamPausePrefs') || 'null');
+        if (savedPausePrefs) {
+            pauseSchedulerCheck.checked = savedPausePrefs.pauseScheduler;
+            pauseSensorsCheck.checked = savedPausePrefs.pauseSensors;
+            rememberPauseChoice.checked = true;
+        }
+
+        // Pending stream config (set when dialog opens)
+        let pendingStreamConfig = null;
+
+        // Start the stream with current pause settings
+        async function startStreamWithPauseOptions() {
+            if (!pendingStreamConfig) return;
+
+            const { deviceId, mode, quality, qualityLabel } = pendingStreamConfig;
+
+            // Save preferences if "Remember" is checked
+            if (rememberPauseChoice.checked) {
+                localStorage.setItem('liveStreamPausePrefs', JSON.stringify({
+                    pauseScheduler: pauseSchedulerCheck.checked,
+                    pauseSensors: pauseSensorsCheck.checked
+                }));
+            } else {
+                localStorage.removeItem('liveStreamPausePrefs');
+            }
+
+            // Configure LiveStream pause behavior
+            liveStream._pauseSchedulerOnStart = pauseSchedulerCheck.checked;
+            liveStream._pauseSensorsOnStart = pauseSensorsCheck.checked;
+
+            // Close dialog
+            pauseOptionsDialog.style.display = 'none';
+
+            // MJPEG, MJPEG v2, or WebSocket mode (with element overlays)
+            const modeLabel = mode === 'mjpeg' ? 'MJPEG' : mode === 'mjpeg-v2' ? 'MJPEG v2' : 'Base64';
+            streamModeValue.textContent = `${modeLabel} - ${qualityLabel}`;
+
+            // Display connection type and backend info
+            const deviceInfo = deviceInfoCache[deviceId] || {};
+            const connType = deviceInfo.connection_type || 'unknown';
+            if (connType === 'wifi') {
+                connectionTypeValue.textContent = 'WiFi';
+                connectionTypeValue.className = 'metric-value connection-wifi';
+            } else if (connType === 'usb') {
+                connectionTypeValue.textContent = 'USB';
+                connectionTypeValue.className = 'metric-value connection-usb';
+            } else {
+                connectionTypeValue.textContent = connType;
+                connectionTypeValue.className = 'metric-value';
+            }
+
+            // Backend info (auto-selected based on availability)
+            captureBackendValue.textContent = 'auto';
+            captureBackendValue.className = 'metric-value';
+
+            // Reset FPS hint
+            fpsHint.style.display = 'none';
+
+            // Start streaming (pause options are applied inside liveStream.start())
+            await liveStream.start(deviceId, mode, quality);
+
+            pendingStreamConfig = null;
+        }
+
+        // Event handlers
+        startBtn.addEventListener('click', async () => {
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+            const mode = streamModeSelect.value;
+            const quality = streamQualitySelect.value;
+            const qualityLabel = streamQualitySelect.options[streamQualitySelect.selectedIndex].text;
+
+            // Store pending config
+            pendingStreamConfig = { deviceId, mode, quality, qualityLabel };
+
+            // If "Remember" was checked and we have saved prefs, skip dialog
+            if (savedPausePrefs && rememberPauseChoice.checked) {
+                await startStreamWithPauseOptions();
+            } else {
+                // Show pause options dialog
+                pauseOptionsDialog.style.display = 'flex';
+            }
+        });
+
+        pauseDialogCancel.addEventListener('click', () => {
+            pauseOptionsDialog.style.display = 'none';
+            pendingStreamConfig = null;
+        });
+
+        pauseDialogStart.addEventListener('click', async () => {
+            await startStreamWithPauseOptions();
+        });
+
+        // Close dialog on overlay click
+        pauseOptionsDialog.addEventListener('click', (e) => {
+            if (e.target === pauseOptionsDialog) {
+                pauseOptionsDialog.style.display = 'none';
+                pendingStreamConfig = null;
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            console.log('[UI] Stop button clicked');
+
+            // Stop live stream
+            liveStream.stop();
+
+            // Reset UI state
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            noStream.style.display = 'flex';
+            statusValue.textContent = 'Disconnected';
+            statusValue.className = 'metric-value status-disconnected';
+            streamModeValue.textContent = '--';
+            bandwidthValue.textContent = '0 KB/s';
+            connectionTypeValue.textContent = '--';
+            connectionTypeValue.className = 'metric-value';
+            captureBackendValue.textContent = '--';
+            captureBackendValue.className = 'metric-value';
+            fpsHint.style.display = 'none';
+            fpsValue.className = 'metric-value';
+
+            // Stop auto-refresh
+            stopAutoRefresh();
+            autoRefreshElements.checked = false;
+
+            console.log('[UI] Stream stopped, UI reset');
+        });
+
+        refreshDevicesBtn.addEventListener('click', loadDevices);
+
+        showOverlays.addEventListener('change', (e) => {
+            liveStream.setOverlaysVisible(e.target.checked);
+        });
+
+        showLabels.addEventListener('change', (e) => {
+            liveStream.setTextLabelsVisible(e.target.checked);
+        });
+
+        // Element filtering and display functions
+        function applyFilters() {
+            if (allElements.length === 0) {
+                elementStatus.textContent = 'Click "Refresh Elements" first';
+                return;
+            }
+
+            filteredElements = allElements.filter(el => {
+                // Filter by clickable only
+                if (filterClickable.checked && !el.clickable) return false;
+
+                // Filter by text only
+                if (filterWithText.checked && (!el.text || !el.text.trim())) return false;
+
+                // Filter small elements
+                if (filterLargeElements.checked && el.bounds) {
+                    if (el.bounds.width < 20 || el.bounds.height < 20) return false;
+                }
+
+                // Filter containers (layout elements)
+                if (filterContainers.checked && el.class) {
+                    if (containerClasses.has(el.class)) {
+                        // Keep if it has text or is clickable (might be a button styled as View)
+                        const hasText = el.text && el.text.trim();
+                        const hasContentDesc = el.content_desc && el.content_desc.trim();
+                        if (!el.clickable && !hasText && !hasContentDesc) {
+                            return false;
+                        }
+                    }
+                }
+
+                // Filter dividers (Space, thin Views)
+                if (filterDividers.checked && el.bounds) {
+                    // Dividers are typically very thin (< 5px in one dimension)
+                    const isThinHorizontal = el.bounds.height < 5 && el.bounds.width > 50;
+                    const isThinVertical = el.bounds.width < 5 && el.bounds.height > 50;
+                    if (isThinHorizontal || isThinVertical) {
+                        return false;
+                    }
+                    // Also filter Space elements
+                    if (el.class && el.class.includes('Space')) {
+                        return false;
+                    }
+                }
+
+                // Filter empty elements (no text, no content-desc, not clickable)
+                if (filterEmpty.checked) {
+                    const hasText = el.text && el.text.trim();
+                    const hasContentDesc = el.content_desc && el.content_desc.trim();
+                    // Keep if: has text OR has content-desc OR is clickable (includes inherited clickable)
+                    // This ensures nav buttons with clickable parents are shown
+                    if (!hasText && !hasContentDesc && !el.clickable) {
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+
+            // Update liveStream elements
+            liveStream.elements = filteredElements;
+            elementsValue.textContent = filteredElements.length;
+
+            // Update status
+            elementStatus.textContent = `${allElements.length} elements (${filteredElements.length} shown)`;
+            console.log(`[Filters] ${allElements.length} total -> ${filteredElements.length} shown`);
+
+            // Re-render overlays on current frame
+            if (liveStream.currentImage) {
+                liveStream._renderFrame(liveStream.currentImage, filteredElements);
+            }
+        }
+
+        async function refreshElements() {
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            elementStatus.textContent = 'Loading...';
+            refreshElementsBtn.disabled = true;
+
+            try {
+                // Use dedicated elements-only endpoint (faster - no screenshot capture)
+                // This endpoint also returns device dimensions for proper scaling
+                const data = await apiGet(`/adb/elements/${encodeURIComponent(deviceId)}`);
+
+                if (data.elements && data.elements.length > 0) {
+                    allElements = data.elements;
+
+                    // Update device dimensions for proper overlay scaling
+                    if (data.device_width && data.device_height) {
+                        liveStream.setDeviceDimensions(data.device_width, data.device_height);
+                        console.log(`[Elements] Device dimensions: ${data.device_width}x${data.device_height}`);
+                    }
+
+                    applyFilters();
+                    elementStatus.textContent = `${allElements.length} elements (${filteredElements.length} shown)`;
+                } else {
+                    allElements = [];
+                    filteredElements = [];
+                    liveStream.elements = [];
+                    elementStatus.textContent = 'No elements found';
+                }
+            } catch (error) {
+                console.error('Failed to refresh elements:', error);
+                elementStatus.textContent = 'Error loading elements';
+            } finally {
+                refreshElementsBtn.disabled = false;
+            }
+        }
+
+        function showSelectedElement(element) {
+            selectedElement = element;
+            selectedElementCard.style.display = 'block';
+
+            document.getElementById('elClass').textContent = element.class || '-';
+            document.getElementById('elText').textContent = element.text || '-';
+            document.getElementById('elResourceId').textContent = element.resource_id || '-';
+            document.getElementById('elContentDesc').textContent = element.content_desc || '-';
+            document.getElementById('elBounds').textContent = element.bounds
+                ? `(${element.bounds.x}, ${element.bounds.y}) ${element.bounds.width}x${element.bounds.height}`
+                : '-';
+            document.getElementById('elClickable').textContent = element.clickable ? 'Yes' : 'No';
+
+            // Highlight the selected element on canvas
+            if (liveStream.currentImage) {
+                liveStream._renderFrame(liveStream.currentImage, filteredElements);
+                // Draw highlight around selected (scale from device to canvas coords)
+                const ctx = liveStream.ctx;
+                const b = element.bounds;
+                if (b) {
+                    // Calculate scale factors: device -> canvas
+                    const scaleX = canvas.width / liveStream.deviceWidth;
+                    const scaleY = canvas.height / liveStream.deviceHeight;
+
+                    // Scale bounds from device to canvas coordinates
+                    const x = Math.floor(b.x * scaleX);
+                    const y = Math.floor(b.y * scaleY);
+                    const width = Math.floor(b.width * scaleX);
+                    const height = Math.floor(b.height * scaleY);
+
+                    ctx.strokeStyle = '#ff00ff';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x, y, width, height);
+                }
+            }
+        }
+
+        function clearSelection() {
+            selectedElement = null;
+            selectedElementCard.style.display = 'none';
+            // Re-render without highlight
+            if (liveStream.currentImage) {
+                liveStream._renderFrame(liveStream.currentImage, filteredElements);
+            }
+        }
+
+        // Dialog elements
+        const createActionDialog = document.getElementById('createActionDialog');
+        const actionNameInput = document.getElementById('actionName');
+        const actionDescInput = document.getElementById('actionDescription');
+        const actionTypeSelect = document.getElementById('actionType');
+        const actionXInput = document.getElementById('actionX');
+        const actionYInput = document.getElementById('actionY');
+        const actionTagsInput = document.getElementById('actionTags');
+        const actionElementInfo = document.getElementById('actionElementInfo');
+        const saveActionBtn = document.getElementById('saveActionBtn');
+        const cancelActionBtn = document.getElementById('cancelActionBtn');
+
+        function showCreateActionDialog() {
+            if (!selectedElement) {
+                alert('No element selected');
+                return;
+            }
+
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            // Get center of element for tap action
+            const b = selectedElement.bounds;
+            const centerX = Math.round(b.x + b.width / 2);
+            const centerY = Math.round(b.y + b.height / 2);
+
+            // Generate default action name
+            const defaultName = selectedElement.text?.trim()
+                || selectedElement.content_desc?.trim()
+                || selectedElement.resource_id?.split('/').pop()
+                || selectedElement.class?.split('.').pop()
+                || 'Unnamed Action';
+
+            // Populate dialog
+            actionNameInput.value = defaultName;
+            actionDescInput.value = `Tap on ${selectedElement.class || 'element'}`;
+            actionTypeSelect.value = 'tap';
+            actionXInput.value = centerX;
+            actionYInput.value = centerY;
+            actionTagsInput.value = '';
+            actionElementInfo.innerHTML = `
+                <strong>Element:</strong> ${selectedElement.class?.split('.').pop() || 'Unknown'}<br>
+                <strong>Resource ID:</strong> ${selectedElement.resource_id || 'N/A'}<br>
+                <strong>Text:</strong> ${selectedElement.text || 'N/A'}
+            `;
+
+            // Show dialog
+            createActionDialog.style.display = 'flex';
+            actionNameInput.focus();
+        }
+
+        function hideCreateActionDialog() {
+            createActionDialog.style.display = 'none';
+        }
+
+        async function saveAction() {
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            const name = actionNameInput.value.trim();
+            if (!name) {
+                alert('Please enter an action name');
+                return;
+            }
+
+            const x = parseInt(actionXInput.value);
+            const y = parseInt(actionYInput.value);
+            if (isNaN(x) || isNaN(y)) {
+                alert('Invalid coordinates');
+                return;
+            }
+
+            // Set device for ActionManager
+            actionManager.setDevice(deviceId);
+
+            // Parse tags
+            const tags = actionTagsInput.value.split(',')
+                .map(t => t.trim())
+                .filter(t => t.length > 0);
+
+            // Build action config
+            const actionConfig = {
+                name: name,
+                description: actionDescInput.value.trim(),
+                action_type: actionTypeSelect.value,
+                x: x,
+                y: y,
+                enabled: true
+            };
+
+            try {
+                saveActionBtn.disabled = true;
+                saveActionBtn.textContent = 'Saving...';
+
+                const result = await actionManager.createAction(actionConfig, tags);
+
+                console.log('Action created:', result);
+                alert(`Action created: ${name}`);
+                hideCreateActionDialog();
+                clearSelection();
+            } catch (error) {
+                console.error('Failed to create action:', error);
+                alert('Failed to create action: ' + error.message);
+            } finally {
+                saveActionBtn.disabled = false;
+                saveActionBtn.textContent = 'Save Action';
+            }
+        }
+
+        // Dialog event handlers
+        saveActionBtn.addEventListener('click', saveAction);
+        cancelActionBtn.addEventListener('click', hideCreateActionDialog);
+        createActionDialog.addEventListener('click', (e) => {
+            if (e.target === createActionDialog) hideCreateActionDialog();
+        });
+
+        // Auto-refresh functions
+        function startAutoRefresh() {
+            const interval = parseInt(autoRefreshInterval.value);
+            console.log(`[AutoRefresh] Starting with ${interval}ms interval`);
+            stopAutoRefresh();
+            autoRefreshTimer = setInterval(async () => {
+                if (liveStream.isActive()) {
+                    console.log('[AutoRefresh] Refreshing elements...');
+                    await refreshElements();
+                }
+            }, interval);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+                console.log('[AutoRefresh] Stopped');
+            }
+        }
+
+        // Element overlay event handlers
+        refreshElementsBtn.addEventListener('click', refreshElements);
+        filterClickable.addEventListener('change', applyFilters);
+        filterWithText.addEventListener('change', applyFilters);
+        filterLargeElements.addEventListener('change', applyFilters);
+        filterContainers.addEventListener('change', applyFilters);
+        filterDividers.addEventListener('change', applyFilters);
+        filterEmpty.addEventListener('change', applyFilters);
+        createActionBtn.addEventListener('click', showCreateActionDialog);
+        clearSelectionBtn.addEventListener('click', clearSelection);
+
+        // Auto-hide stale elements handler
+        const autoHideStaleCheckbox = document.getElementById('autoHideStale');
+        autoHideStaleCheckbox.addEventListener('change', (e) => {
+            liveStream.setAutoHideStaleElements(e.target.checked);
+        });
+
+        // Auto-refresh event handlers
+        autoRefreshElements.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        });
+
+        autoRefreshInterval.addEventListener('change', () => {
+            if (autoRefreshElements.checked) {
+                startAutoRefresh(); // Restart with new interval
+            }
+        });
+
+        // ========================================
+        // Canvas Gesture Handling (matches flow-wizard pattern)
+        // ========================================
+        let dragStart = null;
+        let isDragging = false;
+        const MIN_SWIPE_DISTANCE = 30; // Minimum pixels to count as swipe
+
+        /**
+         * Convert mouse/touch event to canvas coordinates
+         * Uses simple cssToCanvas scaling like flow-wizard
+         */
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else if (e.changedTouches) {
+                clientX = e.changedTouches[0].clientX;
+                clientY = e.changedTouches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            // Simple cssToCanvas scaling (same as flow-wizard-step3.js)
+            const cssToCanvas = canvas.width / rect.width;
+            const canvasX = Math.round((clientX - rect.left) * cssToCanvas);
+            const canvasY = Math.round((clientY - rect.top) * cssToCanvas);
+
+            return {
+                canvasX: Math.max(0, Math.min(canvas.width - 1, canvasX)),
+                canvasY: Math.max(0, Math.min(canvas.height - 1, canvasY))
+            };
+        }
+
+        /**
+         * Get display coordinates for visual feedback (ripples, paths)
+         */
+        function canvasToDisplay(canvasX, canvasY) {
+            const rect = canvas.getBoundingClientRect();
+            const container = document.getElementById('canvasContainer');
+            const containerRect = container.getBoundingClientRect();
+
+            // CSS scale: canvas bitmap to display
+            const cssScale = rect.width / canvas.width;
+
+            // Canvas offset within container
+            const canvasOffsetX = rect.left - containerRect.left;
+            const canvasOffsetY = rect.top - containerRect.top;
+
+            return {
+                x: canvasX * cssScale + canvasOffsetX,
+                y: canvasY * cssScale + canvasOffsetY
+            };
+        }
+
+        /**
+         * Handle gesture start (mousedown/touchstart)
+         */
+        function onGestureStart(e) {
+            if (!liveStream.isActive()) return;
+            e.preventDefault();
+
+            const coords = getCanvasCoords(e);
+            dragStart = {
+                canvasX: coords.canvasX,
+                canvasY: coords.canvasY,
+                timestamp: Date.now()
+            };
+            isDragging = true;
+            canvas.style.cursor = 'grabbing';
+        }
+
+        /**
+         * Handle gesture end (mouseup/touchend)
+         */
+        async function onGestureEnd(e) {
+            if (!isDragging || !dragStart) return;
+
+            const endCoords = getCanvasCoords(e);
+            const dx = endCoords.canvasX - dragStart.canvasX;
+            const dy = endCoords.canvasY - dragStart.canvasY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            isDragging = false;
+            canvas.style.cursor = 'crosshair';
+
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                dragStart = null;
+                return;
+            }
+
+            const container = document.getElementById('canvasContainer');
+
+            if (distance < MIN_SWIPE_DISTANCE) {
+                // It's a tap - convert canvas coords to device coords
+                let deviceX, deviceY;
+                try {
+                    const deviceCoords = liveStream.canvasToDevice(dragStart.canvasX, dragStart.canvasY);
+                    deviceX = deviceCoords.x;
+                    deviceY = deviceCoords.y;
+                } catch (err) {
+                    // Fallback: canvas coords = device coords (1:1)
+                    deviceX = dragStart.canvasX;
+                    deviceY = dragStart.canvasY;
+                }
+
+                console.log(`[Tap] Canvas: (${dragStart.canvasX}, ${dragStart.canvasY}) -> Device: (${deviceX}, ${deviceY})`);
+                lastTapDiv.textContent = `Last tap: (${deviceX}, ${deviceY})`;
+
+                // Show tap ripple effect
+                const displayPos = canvasToDisplay(dragStart.canvasX, dragStart.canvasY);
+                showTapRipple(container, displayPos.x, displayPos.y);
+
+                // Check for element at tap position (elements are in device coords)
+                let foundElement = null;
+                for (let i = filteredElements.length - 1; i >= 0; i--) {
+                    const el = filteredElements[i];
+                    if (!el.bounds) continue;
+                    const b = el.bounds;
+                    if (deviceX >= b.x && deviceX <= b.x + b.width &&
+                        deviceY >= b.y && deviceY <= b.y + b.height) {
+                        foundElement = el;
+                        break;
+                    }
+                }
+
+                if (foundElement) {
+                    console.log(`[Tap] Found element:`, foundElement.text || foundElement.class);
+                    showSelectedElement(foundElement);
+                    lastTapDiv.textContent = `Last tap: (${deviceX}, ${deviceY}) - ${foundElement.text || foundElement.class || 'element'}`;
+                }
+
+                try {
+                    const tapResult = await apiPost('/adb/tap', {
+                        device_id: deviceId,
+                        x: deviceX,
+                        y: deviceY
+                    });
+                    console.log(`[ADB] Tap result:`, tapResult);
+                    recordAction('tap', { x: deviceX, y: deviceY });
+                    refreshAfterAction(500);
+                } catch (error) {
+                    console.error('Tap failed:', error);
+                }
+            } else {
+                // It's a swipe - convert both start and end to device coords
+                let startDevice, endDevice;
+                try {
+                    startDevice = liveStream.canvasToDevice(dragStart.canvasX, dragStart.canvasY);
+                    endDevice = liveStream.canvasToDevice(endCoords.canvasX, endCoords.canvasY);
+                } catch (err) {
+                    // Fallback: canvas coords = device coords (1:1)
+                    startDevice = { x: dragStart.canvasX, y: dragStart.canvasY };
+                    endDevice = { x: endCoords.canvasX, y: endCoords.canvasY };
+                }
+
+                console.log(`[Swipe] Device: (${startDevice.x},${startDevice.y}) -> (${endDevice.x},${endDevice.y})`);
+                lastTapDiv.textContent = `Swipe: (${startDevice.x},${startDevice.y}) → (${endDevice.x},${endDevice.y})`;
+
+                // Show swipe path visualization (in display coords)
+                const startDisplay = canvasToDisplay(dragStart.canvasX, dragStart.canvasY);
+                const endDisplay = canvasToDisplay(endCoords.canvasX, endCoords.canvasY);
+                showSwipePathDisplay(container, startDisplay.x, startDisplay.y, endDisplay.x, endDisplay.y);
+
+                try {
+                    await apiPost('/adb/swipe', {
+                        device_id: deviceId,
+                        x1: startDevice.x,
+                        y1: startDevice.y,
+                        x2: endDevice.x,
+                        y2: endDevice.y,
+                        duration: 300
+                    });
+                    console.log(`[ADB] Swipe complete`);
+                    recordAction('swipe', { x1: startDevice.x, y1: startDevice.y, x2: endDevice.x, y2: endDevice.y });
+                    refreshAfterAction(500);
+                } catch (error) {
+                    console.error('Swipe failed:', error);
+                }
+            }
+
+            dragStart = null;
+        }
+
+        // Mouse events
+        canvas.addEventListener('mousedown', onGestureStart);
+        canvas.addEventListener('mouseup', onGestureEnd);
+        canvas.addEventListener('mouseleave', () => {
+            if (isDragging) {
+                isDragging = false;
+                dragStart = null;
+                canvas.style.cursor = 'crosshair';
+            }
+        });
+
+        // Touch events for mobile
+        canvas.addEventListener('touchstart', onGestureStart, { passive: false });
+        canvas.addEventListener('touchend', onGestureEnd);
+
+        // Navigation controls
+        const lastActionDiv = document.getElementById('lastAction');
+
+        // Auto-refresh elements after actions with a delay
+        async function refreshAfterAction(delayMs = 500) {
+            setTimeout(async () => {
+                try {
+                    await refreshElements();
+                } catch (e) {
+                    console.warn('[AutoRefresh] Failed to refresh after action:', e);
+                }
+            }, delayMs);
+        }
+
+        async function sendKeyEvent(keycode, actionName) {
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+            try {
+                await apiPost('/adb/keyevent', {
+                    device_id: deviceId,
+                    keycode: keycode
+                });
+                lastActionDiv.textContent = `Last action: ${actionName}`;
+                console.log(`Key event: ${actionName} (keycode ${keycode})`);
+                // Auto-refresh elements after screen change
+                refreshAfterAction(600);
+            } catch (error) {
+                console.error(`${actionName} failed:`, error);
+                lastActionDiv.textContent = `Last action: ${actionName} FAILED`;
+            }
+        }
+
+        async function sendSwipe(direction) {
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            // Use DEVICE dimensions for swipe calculations (not canvas dimensions)
+            // Canvas dims vary by stream quality, device dims are actual screen size
+            const w = liveStream.deviceWidth || 1080;
+            const h = liveStream.deviceHeight || 1920;
+            const cx = Math.round(w / 2);
+            const cy = Math.round(h / 2);
+            const swipeLen = Math.round(Math.min(w, h) * 0.4); // 40% of screen
+
+            let x1, y1, x2, y2;
+            switch (direction) {
+                case 'up':
+                    x1 = cx; y1 = cy + swipeLen; x2 = cx; y2 = cy - swipeLen;
+                    break;
+                case 'down':
+                    x1 = cx; y1 = cy - swipeLen; x2 = cx; y2 = cy + swipeLen;
+                    break;
+                case 'left':
+                    x1 = cx + swipeLen; y1 = cy; x2 = cx - swipeLen; y2 = cy;
+                    break;
+                case 'right':
+                    x1 = cx - swipeLen; y1 = cy; x2 = cx + swipeLen; y2 = cy;
+                    break;
+            }
+
+            try {
+                await apiPost('/adb/swipe', {
+                    device_id: deviceId,
+                    x1: x1, y1: y1,
+                    x2: x2, y2: y2,
+                    duration: 300
+                });
+                lastActionDiv.textContent = `Last action: Swipe ${direction}`;
+                console.log(`[Swipe] ${direction}: (${x1},${y1}) -> (${x2},${y2}) [device: ${w}x${h}]`);
+                // Auto-refresh elements after swipe
+                refreshAfterAction(500);
+            } catch (error) {
+                console.error(`Swipe ${direction} failed:`, error);
+                lastActionDiv.textContent = `Last action: Swipe ${direction} FAILED`;
+            }
+        }
+
+        // Button event listeners
+        document.getElementById('btnBack').addEventListener('click', () => sendKeyEvent(4, 'Back'));
+        document.getElementById('btnHome').addEventListener('click', () => sendKeyEvent(3, 'Home'));
+        document.getElementById('btnRecent').addEventListener('click', () => sendKeyEvent(187, 'Recent Apps'));
+        document.getElementById('btnSwipeUp').addEventListener('click', () => sendSwipe('up'));
+        document.getElementById('btnSwipeDown').addEventListener('click', () => sendSwipe('down'));
+        document.getElementById('btnSwipeLeft').addEventListener('click', () => sendSwipe('left'));
+        document.getElementById('btnSwipeRight').addEventListener('click', () => sendSwipe('right'));
+
+        // ========================================
+        // Element Hover Preview
+        // ========================================
+
+        const hoverTooltip = document.getElementById('hoverTooltip');
+        let hoveredElement = null;
+        let lastHoverCoords = { x: 0, y: 0 };
+        let lastHoverTime = 0;
+        const HOVER_THROTTLE_MS = 50; // Max 20 hover updates per second (was 60+)
+
+        /**
+         * Handle mouse move for element hover preview
+         * Throttled to reduce canvas re-renders during rapid mouse movement
+         */
+        function handleCanvasHover(e) {
+            // Throttle hover processing to reduce canvas re-renders
+            const now = performance.now();
+            if (now - lastHoverTime < HOVER_THROTTLE_MS) {
+                // Still update tooltip position for smooth tracking
+                if (hoveredElement) {
+                    updateTooltipPosition(e);
+                }
+                return;
+            }
+            lastHoverTime = now;
+
+            if (!liveStream.isActive() || filteredElements.length === 0) {
+                hideHoverTooltip();
+                return;
+            }
+
+            const coords = getCanvasCoords(e);
+            lastHoverCoords = coords;
+
+            // Convert canvas coords to device coords for element comparison
+            // Elements are in device space (native resolution), not canvas space
+            let deviceX, deviceY;
+            try {
+                const deviceCoords = liveStream.canvasToDevice(coords.canvasX, coords.canvasY);
+                deviceX = deviceCoords.x;
+                deviceY = deviceCoords.y;
+            } catch (err) {
+                deviceX = coords.canvasX;
+                deviceY = coords.canvasY;
+            }
+
+            // Find ALL elements at hover position (using device coords)
+            let elementsAtPoint = [];
+            for (let i = filteredElements.length - 1; i >= 0; i--) {
+                const el = filteredElements[i];
+                if (!el.bounds) continue;
+                const b = el.bounds;
+                if (deviceX >= b.x && deviceX <= b.x + b.width &&
+                    deviceY >= b.y && deviceY <= b.y + b.height) {
+                    elementsAtPoint.push(el);
+                }
+            }
+
+            // Prioritize: clickable elements first, then smallest area
+            let foundElement = null;
+            if (elementsAtPoint.length > 0) {
+                // Separate clickable and non-clickable
+                const clickable = elementsAtPoint.filter(el => el.clickable);
+                const candidates = clickable.length > 0 ? clickable : elementsAtPoint;
+
+                // Pick smallest element (most specific)
+                foundElement = candidates.reduce((smallest, el) => {
+                    const area = el.bounds.width * el.bounds.height;
+                    const smallestArea = smallest.bounds.width * smallest.bounds.height;
+                    return area < smallestArea ? el : smallest;
+                });
+            }
+
+            if (foundElement && foundElement !== hoveredElement) {
+                hoveredElement = foundElement;
+                showHoverTooltip(e, foundElement);
+                highlightHoveredElement(foundElement);
+            } else if (!foundElement && hoveredElement) {
+                hoveredElement = null;
+                hideHoverTooltip();
+                // Re-render without hover highlight
+                if (liveStream.currentImage) {
+                    liveStream._renderFrame(liveStream.currentImage, filteredElements);
+                }
+            } else if (foundElement) {
+                // Update tooltip position
+                updateTooltipPosition(e);
+            }
+        }
+
+        /**
+         * Show hover tooltip with element info
+         */
+        function showHoverTooltip(e, element) {
+            const header = hoverTooltip.querySelector('.tooltip-header');
+            const body = hoverTooltip.querySelector('.tooltip-body');
+
+            // Header: element text or class name
+            const displayName = element.text?.trim() ||
+                               element.content_desc?.trim() ||
+                               element.class?.split('.').pop() ||
+                               'Element';
+            header.textContent = displayName;
+
+            // Body: element details
+            const clickableBadge = element.clickable
+                ? '<span class="clickable-badge">Clickable</span>'
+                : '<span class="not-clickable-badge">Not Clickable</span>';
+
+            let bodyHtml = `<div class="tooltip-row"><span class="tooltip-label">Class:</span><span class="tooltip-value">${element.class?.split('.').pop() || '-'}</span></div>`;
+
+            if (element.resource_id) {
+                const resId = element.resource_id.split('/').pop() || element.resource_id;
+                bodyHtml += `<div class="tooltip-row"><span class="tooltip-label">ID:</span><span class="tooltip-value">${resId}</span></div>`;
+            }
+
+            if (element.bounds) {
+                bodyHtml += `<div class="tooltip-row"><span class="tooltip-label">Size:</span><span class="tooltip-value">${element.bounds.width}x${element.bounds.height}</span></div>`;
+            }
+
+            bodyHtml += `<div class="tooltip-row"><span class="tooltip-label">Status:</span><span class="tooltip-value">${clickableBadge}</span></div>`;
+
+            body.innerHTML = bodyHtml;
+
+            updateTooltipPosition(e);
+            hoverTooltip.style.display = 'block';
+        }
+
+        /**
+         * Update tooltip position near cursor
+         */
+        function updateTooltipPosition(e) {
+            const container = document.getElementById('canvasContainer');
+            const containerRect = container.getBoundingClientRect();
+
+            // Position tooltip near cursor but within container
+            let x = e.clientX - containerRect.left + 15;
+            let y = e.clientY - containerRect.top + 15;
+
+            // Keep tooltip within container bounds
+            const tooltipRect = hoverTooltip.getBoundingClientRect();
+            if (x + tooltipRect.width > containerRect.width - 10) {
+                x = e.clientX - containerRect.left - tooltipRect.width - 15;
+            }
+            if (y + tooltipRect.height > containerRect.height - 10) {
+                y = e.clientY - containerRect.top - tooltipRect.height - 15;
+            }
+
+            hoverTooltip.style.left = Math.max(5, x) + 'px';
+            hoverTooltip.style.top = Math.max(5, y) + 'px';
+        }
+
+        /**
+         * Hide hover tooltip
+         */
+        function hideHoverTooltip() {
+            hoverTooltip.style.display = 'none';
+        }
+
+        /**
+         * Highlight hovered element on canvas
+         * Scales element bounds from device coords to canvas coords
+         */
+        function highlightHoveredElement(element) {
+            if (!liveStream.currentImage) return;
+
+            // Re-render frame first
+            liveStream._renderFrame(liveStream.currentImage, filteredElements);
+
+            // Draw hover highlight
+            const ctx = liveStream.ctx;
+            const b = element.bounds;
+            if (b) {
+                // Calculate scale factors: device -> canvas
+                const scaleX = canvas.width / liveStream.deviceWidth;
+                const scaleY = canvas.height / liveStream.deviceHeight;
+
+                // Scale bounds from device to canvas coordinates
+                const x = Math.floor(b.x * scaleX);
+                const y = Math.floor(b.y * scaleY);
+                const width = Math.floor(b.width * scaleX);
+                const height = Math.floor(b.height * scaleY);
+
+                // Cyan dashed border for hover
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 4]);
+                ctx.strokeRect(x, y, width, height);
+                ctx.setLineDash([]); // Reset
+
+                // Semi-transparent fill
+                ctx.fillStyle = element.clickable
+                    ? 'rgba(0, 255, 255, 0.15)'
+                    : 'rgba(255, 255, 0, 0.1)';
+                ctx.fillRect(x, y, width, height);
+            }
+        }
+
+        // Add hover event listener
+        canvas.addEventListener('mousemove', handleCanvasHover);
+        canvas.addEventListener('mouseleave', () => {
+            hoveredElement = null;
+            hideHoverTooltip();
+            if (liveStream.currentImage && liveStream.isActive()) {
+                liveStream._renderFrame(liveStream.currentImage, filteredElements);
+            }
+        });
+
+        // ========================================
+        // Gesture Recording
+        // ========================================
+
+        const recordBtn = document.getElementById('recordBtn');
+        const clearRecordingBtn = document.getElementById('clearRecordingBtn');
+        const saveRecordingBtn = document.getElementById('saveRecordingBtn');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const recordingText = document.getElementById('recordingText');
+        const recordedActionsDiv = document.getElementById('recordedActions');
+
+        let isRecording = false;
+        let recordedActions = [];
+
+        /**
+         * Toggle recording state
+         */
+        function toggleRecording() {
+            isRecording = !isRecording;
+
+            if (isRecording) {
+                recordBtn.textContent = 'Stop Recording';
+                recordBtn.classList.add('recording');
+                recordingIndicator.classList.add('active');
+                recordingText.textContent = 'Recording... Tap or swipe on the device';
+                console.log('[Recording] Started');
+            } else {
+                recordBtn.textContent = 'Start Recording';
+                recordBtn.classList.remove('recording');
+                recordingIndicator.classList.remove('active');
+                recordingText.textContent = recordedActions.length > 0
+                    ? `Recorded ${recordedActions.length} action(s)`
+                    : 'Not recording';
+                console.log('[Recording] Stopped');
+            }
+        }
+
+        /**
+         * Record an action (tap or swipe)
+         */
+        function recordAction(type, data) {
+            if (!isRecording) return;
+
+            const action = {
+                type: type,
+                timestamp: Date.now(),
+                ...data
+            };
+
+            recordedActions.push(action);
+            updateRecordedActionsUI();
+
+            clearRecordingBtn.disabled = false;
+            saveRecordingBtn.disabled = false;
+
+            console.log(`[Recording] Recorded ${type}:`, data);
+        }
+
+        /**
+         * Update the recorded actions list UI
+         */
+        function updateRecordedActionsUI() {
+            if (recordedActions.length === 0) {
+                recordedActionsDiv.innerHTML = '<p class="empty-message">No actions recorded. Click "Start Recording" and interact with the device.</p>';
+                return;
+            }
+
+            let html = '';
+            recordedActions.forEach((action, index) => {
+                const typeClass = action.type === 'tap' ? 'tap' : 'swipe';
+                let coordsText = '';
+
+                if (action.type === 'tap') {
+                    coordsText = `(${action.x}, ${action.y})`;
+                } else if (action.type === 'swipe') {
+                    coordsText = `(${action.x1}, ${action.y1}) → (${action.x2}, ${action.y2})`;
+                }
+
+                html += `
+                    <div class="recorded-action-item" data-index="${index}">
+                        <span class="action-number">${index + 1}</span>
+                        <span class="action-type ${typeClass}">${action.type.toUpperCase()}</span>
+                        <span class="action-coords">${coordsText}</span>
+                        <button class="action-delete" onclick="deleteRecordedAction(${index})" title="Delete">×</button>
+                    </div>
+                `;
+            });
+
+            recordedActionsDiv.innerHTML = html;
+        }
+
+        /**
+         * Delete a recorded action
+         */
+        window.deleteRecordedAction = function(index) {
+            recordedActions.splice(index, 1);
+            updateRecordedActionsUI();
+
+            if (recordedActions.length === 0) {
+                clearRecordingBtn.disabled = true;
+                saveRecordingBtn.disabled = true;
+                recordingText.textContent = isRecording ? 'Recording...' : 'Not recording';
+            }
+        };
+
+        /**
+         * Clear all recorded actions
+         */
+        function clearRecording() {
+            recordedActions = [];
+            updateRecordedActionsUI();
+            clearRecordingBtn.disabled = true;
+            saveRecordingBtn.disabled = true;
+            recordingText.textContent = isRecording ? 'Recording...' : 'Not recording';
+            console.log('[Recording] Cleared');
+        }
+
+        /**
+         * Save recording as a Flow
+         */
+        async function saveRecordingAsFlow() {
+            if (recordedActions.length === 0) {
+                alert('No actions to save');
+                return;
+            }
+
+            const deviceId = deviceSelect.value;
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            const flowName = prompt('Enter a name for this flow:', `Recorded Flow ${new Date().toLocaleTimeString()}`);
+            if (!flowName) return;
+
+            // Convert recorded actions to flow steps
+            const steps = recordedActions.map((action, index) => {
+                if (action.type === 'tap') {
+                    return {
+                        step_number: index + 1,
+                        action_type: 'tap',
+                        x: action.x,
+                        y: action.y,
+                        delay_after: 500
+                    };
+                } else if (action.type === 'swipe') {
+                    return {
+                        step_number: index + 1,
+                        action_type: 'swipe',
+                        x: action.x1,
+                        y: action.y1,
+                        x2: action.x2,
+                        y2: action.y2,
+                        duration: 300,
+                        delay_after: 500
+                    };
+                }
+            });
+
+            try {
+                saveRecordingBtn.disabled = true;
+                saveRecordingBtn.textContent = 'Saving...';
+
+                const response = await apiPost('/flows', {
+                    name: flowName,
+                    description: `Recorded from Live Stream on ${new Date().toLocaleString()}`,
+                    device_id: deviceId,
+                    steps: steps,
+                    enabled: true
+                });
+
+                console.log('[Recording] Flow saved:', response);
+                alert(`Flow "${flowName}" saved with ${steps.length} steps!`);
+
+                // Clear after save
+                clearRecording();
+
+            } catch (error) {
+                console.error('[Recording] Failed to save flow:', error);
+                alert('Failed to save flow: ' + error.message);
+            } finally {
+                saveRecordingBtn.disabled = recordedActions.length === 0;
+                saveRecordingBtn.textContent = 'Save as Flow';
+            }
+        }
+
+        // Recording button handlers
+        recordBtn.addEventListener('click', toggleRecording);
+        clearRecordingBtn.addEventListener('click', clearRecording);
+        saveRecordingBtn.addEventListener('click', saveRecordingAsFlow);
+
+        // ========================================
+        // Touch Feedback Visualization Functions
+        // ========================================
+
+        /**
+         * Show animated tap ripple at position
+         */
+        function showTapRipple(container, x, y) {
+            // Create main tap indicator
+            const tapIndicator = document.getElementById('tapIndicator');
+            tapIndicator.style.left = x + 'px';
+            tapIndicator.style.top = y + 'px';
+            tapIndicator.style.display = 'block';
+            // Reset animation by forcing reflow
+            tapIndicator.style.animation = 'none';
+            tapIndicator.offsetHeight;
+            tapIndicator.style.animation = '';
+
+            // Create expanding ripple ring
+            const ring = document.createElement('div');
+            ring.className = 'tap-ripple-ring';
+            ring.style.left = x + 'px';
+            ring.style.top = y + 'px';
+            container.appendChild(ring);
+
+            // Create second ring (delayed)
+            setTimeout(() => {
+                const ring2 = document.createElement('div');
+                ring2.className = 'tap-ripple-ring';
+                ring2.style.left = x + 'px';
+                ring2.style.top = y + 'px';
+                container.appendChild(ring2);
+                setTimeout(() => ring2.remove(), 800);
+            }, 150);
+
+            // Cleanup
+            setTimeout(() => {
+                ring.remove();
+                tapIndicator.style.display = 'none';
+            }, 1500);
+        }
+
+        /**
+         * Show animated swipe path (accepts display coordinates directly)
+         */
+        function showSwipePathDisplay(container, displayStartX, displayStartY, displayEndX, displayEndY) {
+            const swipeContainer = document.getElementById('swipePathContainer');
+
+            // Create SVG path with arrow
+            swipeContainer.innerHTML = `
+                <svg style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; overflow: visible;">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                            <polygon points="0 0, 10 3.5, 0 7" class="swipe-arrow" fill="#22c55e"/>
+                        </marker>
+                    </defs>
+                    <line x1="${displayStartX}" y1="${displayStartY}"
+                          x2="${displayEndX}" y2="${displayEndY}"
+                          class="swipe-line" stroke="#22c55e" stroke-width="4" marker-end="url(#arrowhead)"/>
+                </svg>
+            `;
+
+            // Add start dot
+            const startDot = document.createElement('div');
+            startDot.className = 'swipe-dot swipe-dot-start';
+            startDot.style.left = displayStartX + 'px';
+            startDot.style.top = displayStartY + 'px';
+            swipeContainer.appendChild(startDot);
+
+            // Add end dot
+            const endDot = document.createElement('div');
+            endDot.className = 'swipe-dot swipe-dot-end';
+            endDot.style.left = displayEndX + 'px';
+            endDot.style.top = displayEndY + 'px';
+            swipeContainer.appendChild(endDot);
+
+            swipeContainer.style.display = 'block';
+
+            // Cleanup after animation
+            setTimeout(() => {
+                swipeContainer.style.display = 'none';
+                swipeContainer.innerHTML = '';
+            }, 1500);
+        }
+
+        // ========================================
+        // Zoom/Pan State
+        // ========================================
+
+        let zoomScale = 1;
+        let panX = 0;
+        let panY = 0;
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+        const MIN_ZOOM = 0.5;
+        const MAX_ZOOM = 5;
+        const ZOOM_STEP = 0.25;
+
+        const zoomLevelDisplay = document.getElementById('zoomLevel');
+
+        function updateZoomDisplay() {
+            zoomLevelDisplay.textContent = Math.round(zoomScale * 100) + '%';
+        }
+
+        function applyZoom() {
+            canvas.style.transform = `scale(${zoomScale}) translate(${panX}px, ${panY}px)`;
+            canvas.style.transformOrigin = 'center center';
+            updateZoomDisplay();
+        }
+
+        function zoomIn(centerX, centerY) {
+            if (zoomScale >= MAX_ZOOM) return;
+            zoomScale = Math.min(MAX_ZOOM, zoomScale + ZOOM_STEP);
+            applyZoom();
+        }
+
+        function zoomOut(centerX, centerY) {
+            if (zoomScale <= MIN_ZOOM) return;
+            zoomScale = Math.max(MIN_ZOOM, zoomScale - ZOOM_STEP);
+            // Reset pan if zooming back to 1x or less
+            if (zoomScale <= 1) {
+                panX = 0;
+                panY = 0;
+            }
+            applyZoom();
+        }
+
+        function resetZoom() {
+            zoomScale = 1;
+            panX = 0;
+            panY = 0;
+            applyZoom();
+        }
+
+        // Mouse wheel zoom (Ctrl+scroll only - prevents trackpad scroll from zooming)
+        canvas.addEventListener('wheel', (e) => {
+            if (!liveStream.isActive()) return;
+
+            // Only zoom when Ctrl is held (standard browser zoom behavior)
+            // This prevents trackpad two-finger scroll from triggering zoom
+            if (e.ctrlKey) {
+                e.preventDefault();
+                if (e.deltaY < 0) {
+                    zoomIn();
+                } else {
+                    zoomOut();
+                }
+            }
+            // Without Ctrl, allow normal page scroll
+        }, { passive: false });
+
+        // Pan when zoomed (middle mouse or when scale > 1)
+        canvas.addEventListener('mousedown', (e) => {
+            // Middle mouse button or zoomed in + right click
+            if (e.button === 1 || (zoomScale > 1 && e.button === 2)) {
+                e.preventDefault();
+                isPanning = true;
+                panStartX = e.clientX - panX;
+                panStartY = e.clientY - panY;
+                canvas.style.cursor = 'grabbing';
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                panX = e.clientX - panStartX;
+                panY = e.clientY - panStartY;
+                applyZoom();
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = zoomScale > 1 ? 'grab' : 'crosshair';
+            }
+        });
+
+        // Prevent context menu when panning with right click
+        canvas.addEventListener('contextmenu', (e) => {
+            if (zoomScale > 1) {
+                e.preventDefault();
+            }
+        });
+
+        // Touch pinch zoom
+        let touchStartDistance = 0;
+        let touchStartScale = 1;
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                touchStartDistance = Math.sqrt(dx * dx + dy * dy);
+                touchStartScale = zoomScale;
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const scale = (distance / touchStartDistance) * touchStartScale;
+                zoomScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scale));
+                applyZoom();
+            }
+        }, { passive: false });
+
+        // ========================================
+        // Quick Actions Bar
+        // ========================================
+
+        document.getElementById('qabRefresh').addEventListener('click', refreshElements);
+        document.getElementById('qabBack').addEventListener('click', () => sendKeyEvent(4, 'Back'));
+        document.getElementById('qabHome').addEventListener('click', () => sendKeyEvent(3, 'Home'));
+        document.getElementById('qabRecent').addEventListener('click', () => sendKeyEvent(187, 'Recent Apps'));
+
+        // Zoom controls
+        document.getElementById('qabZoomIn').addEventListener('click', () => zoomIn());
+        document.getElementById('qabZoomOut').addEventListener('click', () => zoomOut());
+        document.getElementById('qabZoomReset').addEventListener('click', () => resetZoom());
+
+        // Screenshot save
+        document.getElementById('qabScreenshot').addEventListener('click', () => {
+            if (!liveStream.currentImage) {
+                alert('No frame available');
+                return;
+            }
+
+            // Create a temporary canvas with just the screenshot (no overlays)
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = liveStream.currentImage.width;
+            tempCanvas.height = liveStream.currentImage.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(liveStream.currentImage, 0, 0);
+
+            // Download as PNG
+            const link = document.createElement('a');
+            link.download = `screenshot_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+            link.href = tempCanvas.toDataURL('image/png');
+            link.click();
+
+            console.log('[Screenshot] Saved:', link.download);
+        });
+
+        // Fullscreen toggle
+        let isFullscreen = false;
+        document.getElementById('qabFullscreen').addEventListener('click', () => {
+            const streamCard = document.querySelector('.stream-card');
+            isFullscreen = !isFullscreen;
+
+            if (isFullscreen) {
+                streamCard.classList.add('fullscreen');
+                document.getElementById('qabFullscreen').querySelector('.quick-icon').textContent = '⛶';
+            } else {
+                streamCard.classList.remove('fullscreen');
+                document.getElementById('qabFullscreen').querySelector('.quick-icon').textContent = '⛶';
+            }
+        });
+
+        // ESC to exit fullscreen
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && isFullscreen) {
+                document.querySelector('.stream-card').classList.remove('fullscreen');
+                isFullscreen = false;
+            }
+        });
+
+        // ========================================
+        // Split View - Element Tree
+        // ========================================
+
+        let isSplitView = false;
+        const splitViewContainer = document.getElementById('splitViewContainer');
+        const elementTreePanel = document.getElementById('elementTreePanel');
+        const elementTreeContent = document.getElementById('elementTreeContent');
+        const treeSearch = document.getElementById('treeSearch');
+        let selectedTreeElement = null;
+
+        // Toggle split view
+        document.getElementById('qabSplitView').addEventListener('click', () => {
+            isSplitView = !isSplitView;
+
+            if (isSplitView) {
+                splitViewContainer.classList.add('split-active');
+                elementTreePanel.style.display = 'flex';
+                renderElementTree();
+            } else {
+                splitViewContainer.classList.remove('split-active');
+                elementTreePanel.style.display = 'none';
+            }
+        });
+
+        // Render element tree
+        function renderElementTree() {
+            const searchTerm = treeSearch.value.toLowerCase();
+
+            if (filteredElements.length === 0) {
+                elementTreeContent.innerHTML = '<p class="tree-empty">Click "Refresh Elements" to load</p>';
+                return;
+            }
+
+            // Filter by search
+            let displayElements = filteredElements;
+            if (searchTerm) {
+                displayElements = filteredElements.filter(el =>
+                    (el.text?.toLowerCase().includes(searchTerm)) ||
+                    (el.resource_id?.toLowerCase().includes(searchTerm)) ||
+                    (el.class?.toLowerCase().includes(searchTerm)) ||
+                    (el.content_desc?.toLowerCase().includes(searchTerm))
+                );
+            }
+
+            if (displayElements.length === 0) {
+                elementTreeContent.innerHTML = '<p class="tree-empty">No elements match search</p>';
+                return;
+            }
+
+            let html = '';
+            displayElements.forEach((el, index) => {
+                const displayText = el.text?.trim() || el.content_desc?.trim() || '';
+                const className = el.class?.split('.').pop() || 'Unknown';
+                const resId = el.resource_id?.split('/').pop() || '';
+                const isClickable = el.clickable;
+                const isSelected = selectedTreeElement === el;
+
+                html += `
+                    <div class="tree-item ${isClickable ? 'clickable' : 'not-clickable'} ${isSelected ? 'selected' : ''}"
+                         data-index="${index}">
+                        <div class="tree-item-header">
+                            <span class="tree-item-class">${className}</span>
+                            ${isClickable ? '<span class="tree-item-badge">Clickable</span>' : ''}
+                        </div>
+                        ${displayText ? `<div class="tree-item-text">"${displayText}"</div>` : ''}
+                        ${resId ? `<div class="tree-item-id">${resId}</div>` : ''}
+                        <div class="tree-item-actions">
+                            <button class="tree-btn tree-btn-highlight" onclick="highlightTreeElement(${index})" title="Highlight on screen">👁</button>
+                            <button class="tree-btn tree-btn-press" onclick="pressTreeElement(${index})" title="Tap this element">Press</button>
+                        </div>
+                        <div class="tree-item-actions">
+                            <button class="tree-btn tree-btn-action" onclick="createActionFromTree(${index})" title="Create action from element">+ Action</button>
+                            <button class="tree-btn tree-btn-sensor" onclick="createSensorFromTree(${index})" title="Create sensor from element">+ Sensor</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            elementTreeContent.innerHTML = html;
+        }
+
+        // Get elements based on current search filter
+        function getDisplayedElements() {
+            return treeSearch.value
+                ? filteredElements.filter(el =>
+                    (el.text?.toLowerCase().includes(treeSearch.value.toLowerCase())) ||
+                    (el.resource_id?.toLowerCase().includes(treeSearch.value.toLowerCase())) ||
+                    (el.class?.toLowerCase().includes(treeSearch.value.toLowerCase())) ||
+                    (el.content_desc?.toLowerCase().includes(treeSearch.value.toLowerCase()))
+                  )
+                : filteredElements;
+        }
+
+        // Highlight element on canvas (temporary, just visual)
+        window.highlightTreeElement = function(index) {
+            const elements = getDisplayedElements();
+            if (index < 0 || index >= elements.length) return;
+
+            const element = elements[index];
+            highlightHoveredElement(element);
+            console.log('[Tree] Highlighted element:', element.class?.split('.').pop());
+        };
+
+        // Select element from tree (populates Selected Element card)
+        window.selectTreeElement = function(index) {
+            const elements = getDisplayedElements();
+            if (index < 0 || index >= elements.length) return;
+
+            const element = elements[index];
+            selectedTreeElement = element;
+
+            // Show in selected element card (enables Create Action)
+            showSelectedElement(element);
+
+            // Update tree UI to show selected state
+            renderElementTree();
+
+            // Scroll the selected element card into view
+            selectedElementCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            console.log('[Tree] Selected element:', element);
+        };
+
+        // Create action from tree element
+        window.createActionFromTree = function(index) {
+            const elements = getDisplayedElements();
+            if (index < 0 || index >= elements.length) return;
+
+            const element = elements[index];
+
+            // Select the element first (populates selectedElement)
+            selectedElement = element;
+            selectedTreeElement = element;
+
+            // Open the create action dialog
+            showCreateActionDialog();
+        };
+
+        // Create sensor from tree element
+        window.createSensorFromTree = async function(index) {
+            const elements = getDisplayedElements();
+            if (index < 0 || index >= elements.length) return;
+
+            const element = elements[index];
+            const deviceId = deviceSelect.value;
+
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            // Generate sensor name from element
+            const sensorName = element.text?.trim() ||
+                              element.content_desc?.trim() ||
+                              element.resource_id?.split('/').pop() ||
+                              element.class?.split('.').pop() ||
+                              'Element Sensor';
+
+            const name = prompt('Enter sensor name:', sensorName);
+            if (!name) return;
+
+            try {
+                // Create sensor via API
+                const sensorConfig = {
+                    name: name,
+                    device_id: deviceId,
+                    element_selector: {}
+                };
+
+                // Build selector from element properties
+                if (element.resource_id) {
+                    sensorConfig.element_selector.resource_id = element.resource_id;
+                } else if (element.text) {
+                    sensorConfig.element_selector.text = element.text;
+                } else if (element.content_desc) {
+                    sensorConfig.element_selector.content_desc = element.content_desc;
+                } else if (element.class) {
+                    sensorConfig.element_selector.class_name = element.class;
+                    if (element.bounds) {
+                        // Use bounds as additional selector
+                        sensorConfig.element_selector.bounds = element.bounds;
+                    }
+                }
+
+                const result = await apiPost('/sensors', sensorConfig);
+                console.log('[Tree] Sensor created:', result);
+                alert(`Sensor "${name}" created!`);
+
+            } catch (error) {
+                console.error('[Tree] Failed to create sensor:', error);
+                alert('Failed to create sensor: ' + error.message);
+            }
+        };
+
+        // Press/tap element directly from tree
+        window.pressTreeElement = async function(index) {
+            const elements = getDisplayedElements();
+            if (index < 0 || index >= elements.length) return;
+
+            const element = elements[index];
+            const deviceId = deviceSelect.value;
+
+            if (!deviceId) {
+                alert('Please select a device');
+                return;
+            }
+
+            if (!element.bounds) {
+                alert('Element has no bounds');
+                return;
+            }
+
+            // Calculate center of element
+            const b = element.bounds;
+            const centerX = Math.round(b.x + b.width / 2);
+            const centerY = Math.round(b.y + b.height / 2);
+
+            // Highlight the element briefly
+            highlightHoveredElement(element);
+
+            try {
+                console.log(`[Tree] Pressing element at (${centerX}, ${centerY})`);
+                await apiPost('/adb/tap', {
+                    device_id: deviceId,
+                    x: centerX,
+                    y: centerY
+                });
+
+                lastTapDiv.textContent = `Last tap: (${centerX}, ${centerY}) - ${element.text || element.class?.split('.').pop() || 'element'}`;
+
+                // Record if recording
+                recordAction('tap', { x: centerX, y: centerY });
+
+                console.log('[Tree] Press successful');
+            } catch (error) {
+                console.error('[Tree] Press failed:', error);
+                alert('Failed to tap element: ' + error.message);
+            }
+        };
+
+        // Search input handler
+        treeSearch.addEventListener('input', () => {
+            renderElementTree();
+        });
+
+        // Update tree when elements are refreshed
+        const originalApplyFilters = applyFilters;
+        applyFilters = function() {
+            originalApplyFilters();
+            if (isSplitView) {
+                renderElementTree();
+            }
+        };
+
+        // Initialize
+        loadDevices();
+    </script>
+</body>
+</html>

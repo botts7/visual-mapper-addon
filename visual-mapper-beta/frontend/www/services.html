@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.3.1" data-build="dynamic">
+    <title>Services - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+    <!-- Dynamic CSS loading -->
+    <script>
+        const cacheKey = sessionStorage.getItem('vmCacheKey') || Date.now();
+        sessionStorage.setItem('vmCacheKey', cacheKey);
+        document.write('<link rel="stylesheet" href="css/styles.css?v=0.3.1">');
+    </script>
+    <noscript>
+        <link rel="stylesheet" href="css/styles.css">
+    </noscript>
+
+    <!-- Apply dark mode immediately to prevent flash -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('visual-mapper-theme');
+            if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark-mode');
+                document.addEventListener('DOMContentLoaded', () => {
+                    document.body.classList.add('dark-mode');
+                });
+            }
+        })();
+    </script>
+    <style>
+        .service-card {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .service-info {
+            flex: 1;
+        }
+        .service-name {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .service-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        .service-status.running {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4CAF50;
+        }
+        .service-status.stopped {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+        }
+        .service-status.checking {
+            background: rgba(255, 193, 7, 0.2);
+            color: #FFC107;
+        }
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .status-indicator.running {
+            background: #4CAF50;
+            animation: pulse 2s infinite;
+        }
+        .status-indicator.stopped {
+            background: #f44336;
+        }
+        .status-indicator.checking {
+            background: #FFC107;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .service-details {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            margin-top: 5px;
+        }
+        .service-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .service-actions button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-start {
+            background: #4CAF50;
+            color: white;
+        }
+        .btn-start:hover {
+            background: #45a049;
+        }
+        .btn-stop {
+            background: #f44336;
+            color: white;
+        }
+        .btn-stop:hover {
+            background: #d32f2f;
+        }
+        .btn-restart {
+            background: #2196F3;
+            color: white;
+        }
+        .btn-restart:hover {
+            background: #1976D2;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .refresh-btn {
+            background: var(--primary-color);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .docker-info {
+            background: rgba(33, 150, 243, 0.1);
+            border: 1px solid rgba(33, 150, 243, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .docker-info h3 {
+            margin: 0 0 10px 0;
+            color: #2196F3;
+        }
+        .docker-info code {
+            background: var(--card-background);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        /* ML Data Section */
+        .ml-data-section {
+            margin-top: 30px;
+        }
+        .ml-data-section h2 {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .ml-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        .stat-label {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+        .ml-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .ml-actions button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-export {
+            background: #4CAF50;
+            color: white;
+        }
+        .btn-export:hover {
+            background: #45a049;
+        }
+        .btn-import {
+            background: #2196F3;
+            color: white;
+        }
+        .btn-import:hover {
+            background: #1976D2;
+        }
+        .btn-reset {
+            background: #ff9800;
+            color: white;
+        }
+        .btn-reset:hover {
+            background: #f57c00;
+        }
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #d32f2f;
+        }
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+        .ml-info {
+            background: rgba(33, 150, 243, 0.1);
+            border: 1px solid rgba(33, 150, 243, 0.3);
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+        .ml-info code {
+            background: var(--card-background);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        /* Accelerator Status */
+        .accelerator-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .accelerator-card {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .accelerator-card.available {
+            border-color: rgba(76, 175, 80, 0.5);
+            background: rgba(76, 175, 80, 0.05);
+        }
+        .accelerator-card.unavailable {
+            opacity: 0.6;
+        }
+        .accelerator-name {
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 5px;
+        }
+        .accelerator-name .icon {
+            font-size: 1.3em;
+        }
+        .accelerator-status {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+        }
+        .accelerator-status.active {
+            color: #4CAF50;
+            font-weight: 500;
+        }
+        .trainer-badge {
+            display: inline-block;
+            background: var(--primary-color);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.3.1"></script>
+
+    <div class="container">
+        <div class="card">
+            <h1>Backend Services</h1>
+            <p>Monitor and control Visual Mapper backend services</p>
+        </div>
+
+        <div class="docker-info">
+            <h3>Docker Deployment</h3>
+            <p>Run all services with a single command:</p>
+            <p><code>docker-compose up -d</code></p>
+            <p>Stop all services: <code>docker-compose down</code></p>
+        </div>
+
+        <button class="refresh-btn" onclick="refreshStatus()">Refresh Status</button>
+
+        <div id="services-container">
+            <!-- MQTT Broker -->
+            <div class="service-card" id="mqtt-service">
+                <div class="service-info">
+                    <div class="service-name">MQTT Broker</div>
+                    <div class="service-status checking" id="mqtt-status">
+                        <span class="status-indicator checking"></span>
+                        <span>Checking...</span>
+                    </div>
+                    <div class="service-details" id="mqtt-details">Message bus for Android and server communication</div>
+                </div>
+                <div class="service-actions">
+                    <span style="color: var(--text-secondary); font-size: 0.9em;">External service</span>
+                </div>
+            </div>
+
+            <!-- Main Server -->
+            <div class="service-card" id="server-service">
+                <div class="service-info">
+                    <div class="service-name">Main Server</div>
+                    <div class="service-status running" id="server-status">
+                        <span class="status-indicator running"></span>
+                        <span>Running</span>
+                    </div>
+                    <div class="service-details" id="server-details">FastAPI backend - you're viewing this page from it!</div>
+                </div>
+                <div class="service-actions">
+                    <span style="color: var(--text-secondary); font-size: 0.9em;">Always running</span>
+                </div>
+            </div>
+
+            <!-- ML Training Server -->
+            <div class="service-card" id="ml-service">
+                <div class="service-info">
+                    <div class="service-name">ML Training Server</div>
+                    <div class="service-status checking" id="ml-status">
+                        <span class="status-indicator checking"></span>
+                        <span>Checking...</span>
+                    </div>
+                    <div class="service-details" id="ml-details">Q-Learning model training with NPU/GPU acceleration</div>
+                </div>
+                <div class="service-actions">
+                    <button class="btn-start" id="ml-start" onclick="startMl()">Start</button>
+                    <button class="btn-stop" id="ml-stop" onclick="stopMl()">Stop</button>
+                    <button class="btn-restart" id="ml-restart" onclick="restartMl()">Restart</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hardware Accelerators Section -->
+        <div class="ml-data-section">
+            <div class="card">
+                <h2>Hardware Accelerators</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                    Available hardware for ML acceleration. Currently using: <span id="trainer-type" class="trainer-badge">Loading...</span>
+                </p>
+
+                <div class="accelerator-grid" id="accelerator-grid">
+                    <div class="accelerator-card unavailable" id="accel-coral">
+                        <div class="accelerator-name">
+                            <span class="icon">USB</span>
+                            Coral Edge TPU
+                        </div>
+                        <div class="accelerator-status" id="coral-status">Checking...</div>
+                    </div>
+                    <div class="accelerator-card unavailable" id="accel-cuda">
+                        <div class="accelerator-name">
+                            <span class="icon">GPU</span>
+                            NVIDIA CUDA
+                        </div>
+                        <div class="accelerator-status" id="cuda-status">Checking...</div>
+                    </div>
+                    <div class="accelerator-card unavailable" id="accel-directml">
+                        <div class="accelerator-name">
+                            <span class="icon">NPU</span>
+                            DirectML
+                        </div>
+                        <div class="accelerator-status" id="directml-status">Checking...</div>
+                    </div>
+                    <div class="accelerator-card available" id="accel-cpu">
+                        <div class="accelerator-name">
+                            <span class="icon">CPU</span>
+                            CPU (Fallback)
+                        </div>
+                        <div class="accelerator-status active">Always available</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ML Data Section -->
+        <div class="ml-data-section">
+            <div class="card">
+                <h2>ML Training Data</h2>
+
+                <div class="ml-stats-grid" id="ml-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-states">-</div>
+                        <div class="stat-label">States Learned</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-actions">-</div>
+                        <div class="stat-label">Actions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-updates">-</div>
+                        <div class="stat-label">Training Updates</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-avg-q">-</div>
+                        <div class="stat-label">Avg Q-Value</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-exploration">-</div>
+                        <div class="stat-label">Exploration Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-size">-</div>
+                        <div class="stat-label">Q-Table Size</div>
+                    </div>
+                </div>
+
+                <div id="ml-last-updated" style="color: var(--text-secondary); font-size: 0.85em; margin-bottom: 15px;"></div>
+
+                <div class="ml-actions">
+                    <button class="btn-export" onclick="exportQTable()">
+                        <span>Download Q-Table</span>
+                    </button>
+
+                    <div class="file-input-wrapper">
+                        <button class="btn-import">
+                            <span>Import Q-Table</span>
+                        </button>
+                        <input type="file" id="import-file" accept=".json" onchange="importQTable(this)">
+                    </div>
+
+                    <button class="btn-reset" onclick="resetMlData()">
+                        <span>Reset Learning</span>
+                    </button>
+                </div>
+
+                <div class="ml-info">
+                    <strong>Data Location:</strong> <code>/config/visual_mapper/ml/</code><br>
+                    <small>Q-table data persists across addon restarts. Reset creates a backup (.bak file).</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        async function refreshStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/services/status`);
+                const data = await response.json();
+
+                updateServiceCard('mqtt', data.mqtt);
+                updateServiceCard('server', data.server);
+                updateServiceCard('ml', data.ml_training);
+            } catch (error) {
+                console.error('Failed to fetch service status:', error);
+            }
+        }
+
+        function updateServiceCard(serviceId, status) {
+            const statusEl = document.getElementById(`${serviceId}-status`);
+            const detailsEl = document.getElementById(`${serviceId}-details`);
+            const indicatorClass = status.running ? 'running' : 'stopped';
+            const statusText = status.running ? 'Running' : 'Stopped';
+
+            statusEl.className = `service-status ${indicatorClass}`;
+            statusEl.innerHTML = `
+                <span class="status-indicator ${indicatorClass}"></span>
+                <span>${statusText}</span>
+            `;
+
+            if (status.details) {
+                detailsEl.textContent = status.details;
+            }
+
+            // Update button states for ML service
+            if (serviceId === 'ml') {
+                document.getElementById('ml-start').disabled = status.running;
+                document.getElementById('ml-stop').disabled = !status.running;
+                document.getElementById('ml-restart').disabled = !status.running;
+            }
+        }
+
+        async function startMl() {
+            const btn = document.getElementById('ml-start');
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Starting...';
+
+                const response = await fetch(`${API_BASE}/api/services/ml/start`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to start ML service');
+                }
+
+                await refreshStatus();
+            } catch (error) {
+                console.error('Failed to start ML service:', error);
+                alert('Failed to start ML service:\n\n' + error.message);
+            } finally {
+                btn.textContent = 'Start';
+                btn.disabled = false;
+            }
+        }
+
+        async function stopMl() {
+            try {
+                const btn = document.getElementById('ml-stop');
+                btn.disabled = true;
+                btn.textContent = 'Stopping...';
+
+                const response = await fetch(`${API_BASE}/api/services/ml/stop`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                await refreshStatus();
+                btn.textContent = 'Stop';
+            } catch (error) {
+                console.error('Failed to stop ML service:', error);
+                alert('Failed to stop ML service: ' + error.message);
+            }
+        }
+
+        async function restartMl() {
+            try {
+                const btn = document.getElementById('ml-restart');
+                btn.disabled = true;
+                btn.textContent = 'Restarting...';
+
+                const response = await fetch(`${API_BASE}/api/services/ml/restart`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                await refreshStatus();
+                btn.textContent = 'Restart';
+            } catch (error) {
+                console.error('Failed to restart ML service:', error);
+                alert('Failed to restart ML service: ' + error.message);
+            }
+        }
+
+        // ========== ML Data Functions ==========
+
+        async function loadMlStats() {
+            try {
+                // Load status (includes accelerator info)
+                const statusRes = await fetch(`${API_BASE}/api/ml/status`);
+                const status = await statusRes.json();
+
+                // Update trainer type badge
+                const trainerEl = document.getElementById('trainer-type');
+                if (status.trainer_type) {
+                    trainerEl.textContent = status.trainer_type;
+                } else {
+                    trainerEl.textContent = 'Disabled';
+                }
+
+                // Update accelerator cards
+                if (status.accelerators) {
+                    updateAcceleratorCard('coral', status.accelerators.coral_available,
+                        status.accelerators.coral_available
+                            ? `${status.accelerators.coral_devices} device(s) detected`
+                            : 'Not detected');
+
+                    updateAcceleratorCard('cuda', status.accelerators.cuda_available,
+                        status.accelerators.cuda_available
+                            ? status.accelerators.cuda_device || 'Available'
+                            : 'Not available');
+
+                    updateAcceleratorCard('directml', status.accelerators.directml_available,
+                        status.accelerators.directml_available
+                            ? 'Available (NPU/GPU)'
+                            : 'Not available');
+                }
+
+                // Update size
+                if (status.q_table_size) {
+                    const sizeKB = (status.q_table_size / 1024).toFixed(1);
+                    document.getElementById('stat-size').textContent = `${sizeKB} KB`;
+                } else {
+                    document.getElementById('stat-size').textContent = '-';
+                }
+
+                // Update last updated
+                if (status.last_updated) {
+                    const date = new Date(status.last_updated);
+                    document.getElementById('ml-last-updated').textContent =
+                        `Last updated: ${date.toLocaleString()}`;
+                } else {
+                    document.getElementById('ml-last-updated').textContent = 'No training data yet';
+                }
+
+                // Load stats
+                const statsRes = await fetch(`${API_BASE}/api/ml/stats`);
+                const stats = await statsRes.json();
+
+                document.getElementById('stat-states').textContent = stats.total_states.toLocaleString();
+                document.getElementById('stat-actions').textContent = stats.total_actions.toLocaleString();
+                document.getElementById('stat-updates').textContent = stats.total_updates.toLocaleString();
+                document.getElementById('stat-avg-q').textContent = stats.avg_q_value.toFixed(3);
+                document.getElementById('stat-exploration').textContent =
+                    `${(stats.exploration_rate * 100).toFixed(1)}%`;
+
+            } catch (error) {
+                console.error('Failed to load ML stats:', error);
+            }
+        }
+
+        function updateAcceleratorCard(id, available, statusText) {
+            const card = document.getElementById(`accel-${id}`);
+            const statusEl = document.getElementById(`${id}-status`);
+
+            if (card) {
+                card.className = `accelerator-card ${available ? 'available' : 'unavailable'}`;
+            }
+            if (statusEl) {
+                statusEl.textContent = statusText;
+                statusEl.className = `accelerator-status ${available ? 'active' : ''}`;
+            }
+        }
+
+        function exportQTable() {
+            // Trigger download via hidden link
+            const link = document.createElement('a');
+            link.href = `${API_BASE}/api/ml/export`;
+            link.download = 'visual_mapper_q_table.json';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        async function importQTable(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                const response = await fetch(`${API_BASE}/api/ml/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('Q-Table imported successfully!');
+                    loadMlStats();
+                } else {
+                    alert('Failed to import: ' + (result.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Import failed:', error);
+                alert('Failed to import Q-Table: ' + error.message);
+            }
+
+            // Reset file input
+            input.value = '';
+        }
+
+        async function resetMlData() {
+            if (!confirm('Reset all ML learning data? A backup will be created.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/ml/reset`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('ML data reset successfully. Backup saved with .bak extension.');
+                    loadMlStats();
+                } else {
+                    alert('Reset had issues: ' + (result.message || 'Check logs'));
+                }
+            } catch (error) {
+                console.error('Reset failed:', error);
+                alert('Failed to reset ML data: ' + error.message);
+            }
+        }
+
+        // Initial load
+        refreshStatus();
+        loadMlStats();
+
+        // Auto-refresh every 10 seconds
+        setInterval(refreshStatus, 10000);
+        setInterval(loadMlStats, 30000);  // Refresh ML stats every 30 seconds
+    </script>
+</body>
+</html>

@@ -1,0 +1,2269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.3.1" data-build="dynamic">
+    <title>Devices - Visual Mapper</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+    <!-- Dynamic CSS loading -->
+    <script>
+        const cacheKey = sessionStorage.getItem('vmCacheKey') || Date.now();
+        sessionStorage.setItem('vmCacheKey', cacheKey);
+        document.write('<link rel="stylesheet" href="css/styles.css?v=0.3.1">');
+    </script>
+    <noscript>
+        <link rel="stylesheet" href="css/styles.css">
+    </noscript>
+
+    <!-- Apply dark mode immediately to prevent flash -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('visual-mapper-theme');
+            if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark-mode');
+                document.addEventListener('DOMContentLoaded', () => {
+                    document.body.classList.add('dark-mode');
+                });
+            }
+        })();
+    </script>
+    <style>
+        /* Tab Navigation Styles */
+        .device-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border-color);
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+        .device-tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+        }
+        .device-tab:hover {
+            color: var(--text-color);
+            background: var(--background-color);
+        }
+        .device-tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+        .tab-panel {
+            display: none;
+        }
+        .tab-panel.active {
+            display: block;
+        }
+        /* Device selector bar */
+        .device-selector-bar {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .device-selector-bar label {
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .device-selector-bar select {
+            flex: 1;
+            min-width: 200px;
+            max-width: 400px;
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+        /* Form grid */
+        .form-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .form-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .form-group input, .form-group select {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .info-box {
+            background: #e3f2fd;
+            padding: 12px 15px;
+            border-left: 3px solid #2196f3;
+            border-radius: 0 6px 6px 0;
+            margin-bottom: 15px;
+            font-size: 13px;
+        }
+        .info-box.warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+        }
+        .section-card {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .section-card h3 {
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            color: var(--text-color);
+        }
+        .device-item {
+            padding: 12px 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            background: var(--background-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .device-item-info {
+            flex: 1;
+            min-width: 200px;
+        }
+        .device-item-name {
+            font-weight: 600;
+            color: var(--text-color);
+        }
+        .device-item-meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .device-item-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .device-tab {
+                padding: 10px 16px;
+                font-size: 13px;
+            }
+            .control-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.3.1"></script>
+
+    <div class="container">
+        <!-- Page Header with Device Selector -->
+        <div class="card" style="margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                <div>
+                    <h1 style="margin: 0;">Device Management</h1>
+                    <p style="margin: 5px 0 0 0; color: var(--text-secondary);">Manage Android devices connected via ADB</p>
+                </div>
+                <div class="device-selector-bar" style="margin: 0; border: none; padding: 0; background: none;">
+                    <label for="deviceSelect">Active Device:</label>
+                    <select id="deviceSelect">
+                        <option value="">-- Select Device --</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="device-tabs">
+            <button class="device-tab active" data-tab="connect">Connect</button>
+            <button class="device-tab" data-tab="devices">Devices</button>
+            <button class="device-tab" data-tab="apps">Apps</button>
+            <button class="device-tab" data-tab="control">Control</button>
+        </div>
+
+        <!-- TAB: Connect -->
+        <div id="tab-connect" class="tab-panel active">
+            <div class="section-card">
+                <h3>Connect New Device</h3>
+
+                <div class="form-group" style="margin-bottom: 15px; max-width: 350px;">
+                    <label for="connectionType">Connection Type</label>
+                    <select id="connectionType">
+                        <option value="tcp">TCP/IP - Legacy (Port 5555)</option>
+                        <option value="wireless">Wireless ADB - Android 11+</option>
+                        <option value="pairing">Wireless Pairing - Android 11+</option>
+                        <option value="tls">TLS/Secure ADB (Advanced)</option>
+                    </select>
+                </div>
+
+                <div id="tcpConfig">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="deviceHost">Device IP Address</label>
+                            <input type="text" id="deviceHost" placeholder="192.168.1.100" style="width: 180px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="devicePort">Port</label>
+                            <input type="number" id="devicePort" value="5555" style="width: 80px;">
+                        </div>
+                        <button id="connectBtn" class="btn btn-primary" style="align-self: flex-end;">Connect</button>
+                    </div>
+                </div>
+
+                <div id="pairingConfig" style="display: none;">
+                    <div class="info-box">
+                        <strong>Android 11+ Wireless Pairing:</strong><br>
+                        1. Settings → Developer Options → Wireless debugging<br>
+                        2. Tap "Pair device with pairing code"<br>
+                        3. Enter the pairing code and BOTH ports shown
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pairingHost">Device IP</label>
+                            <input type="text" id="pairingHost" placeholder="192.168.1.2" style="width: 150px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="pairingCode">Pairing Code</label>
+                            <input type="text" id="pairingCode" placeholder="123456" maxlength="6" style="width: 100px;">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pairingPort">Pairing Port</label>
+                            <input type="number" id="pairingPort" placeholder="37899" style="width: 100px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="connectionPort">Connection Port</label>
+                            <input type="number" id="connectionPort" placeholder="45441" style="width: 100px;">
+                        </div>
+                        <button id="pairBtn" class="btn btn-primary" style="align-self: flex-end;">Pair & Connect</button>
+                    </div>
+                </div>
+
+                <div id="wirelessConfig" style="display: none;">
+                    <div class="info-box">
+                        <strong>Wireless ADB Setup (Android 11+):</strong><br>
+                        1. Enable Developer Options → Wireless debugging<br>
+                        2. Note the IP address and port shown<br>
+                        3. Enter them above
+                    </div>
+                </div>
+
+                <div id="tlsConfig" style="display: none;">
+                    <div class="info-box warning">
+                        <strong>TLS/Secure ADB:</strong><br>
+                        Advanced secure connection with certificate authentication.
+                        Requires pre-configured certificates on both client and device.
+                    </div>
+                </div>
+
+                <p class="status" id="connectionStatus"></p>
+            </div>
+
+            <div class="section-card">
+                <h3>Network Discovery</h3>
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 15px;">
+                    Scan your network for Android devices with ADB enabled.
+                </p>
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+                    <button id="scanNetworkBtn" class="btn btn-secondary">🔍 Scan Network</button>
+                    <span id="scanStatus" style="color: var(--text-secondary); font-size: 13px;"></span>
+                </div>
+                <div id="discoveredDevicesContainer" style="display: none;">
+                    <div id="discoveredDevicesList"></div>
+                </div>
+                <div id="noDevicesFound" style="display: none; padding: 15px; background: var(--background-color); border-radius: 6px; color: var(--text-secondary); font-size: 13px;">
+                    No devices found. Ensure ADB debugging is enabled on your device.
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: Devices -->
+        <div id="tab-devices" class="tab-panel">
+            <div class="section-card">
+                <h3>Connected Devices</h3>
+                <div id="devicesList">
+                    <p style="color: var(--text-secondary); font-style: italic;">No devices connected</p>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0;">Known Devices</h3>
+                    <button id="reconnectAllBtn" class="btn btn-secondary btn-sm">🔄 Reconnect All</button>
+                </div>
+
+                <div style="background: var(--background-color); padding: 12px 15px; border-radius: 8px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                    <div>
+                        <strong>Auto-Reconnect on Startup</strong>
+                        <p style="margin: 3px 0 0 0; font-size: 12px; color: var(--text-secondary);">
+                            Automatically reconnect devices when server starts
+                        </p>
+                    </div>
+                    <label class="toggle-switch" style="margin: 0;">
+                        <input type="checkbox" id="autoReconnectToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div id="savedDevicesList"></div>
+                <div id="noSavedDevices" style="display: none; color: var(--text-secondary); font-style: italic;">
+                    No known devices. Connect a device to add it here.
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: Apps -->
+        <div id="tab-apps" class="tab-panel">
+            <div class="section-card">
+                <h3>App Launcher</h3>
+                <div class="form-row" style="margin-bottom: 15px;">
+                    <button id="refreshAppsBtn" class="btn btn-secondary">Load Apps</button>
+                    <label style="display: flex; align-items: center; gap: 5px;">
+                        <input type="checkbox" id="showSystemApps"> Show System Apps
+                    </label>
+                    <input type="text" id="appSearch" placeholder="Search apps..." style="flex: 1; max-width: 250px; padding: 8px;">
+                </div>
+                <div id="appSearchResults" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 10px; display: none; background: var(--card-background);"></div>
+                <div class="form-row">
+                    <select id="appSelect" style="flex: 1; min-width: 250px; padding: 8px;">
+                        <option value="">Select device first, then click 'Load Apps'</option>
+                    </select>
+                    <button id="launchAppBtn" class="btn btn-primary">Launch App</button>
+                </div>
+                <p class="status" id="appLauncherStatus"></p>
+            </div>
+
+            <div class="section-card">
+                <h3>App Icon Management</h3>
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 15px;">
+                    Scrape device-specific app icons for high-quality display.
+                </p>
+                <div id="iconCacheStatus" style="background: var(--background-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; display: none;">
+                    <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+                        <div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">Cached Icons</div>
+                            <div id="iconCount" style="font-size: 20px; font-weight: bold;">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">Cache Size</div>
+                            <div id="cacheSize" style="font-size: 20px; font-weight: bold;">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">New Apps</div>
+                            <div id="newAppsCount" style="font-size: 20px; font-weight: bold;">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button id="checkIconCacheBtn" class="btn btn-secondary">Check Cache</button>
+                    <button id="scrapeIconsBtn" class="btn btn-primary">Scrape Icons</button>
+                    <button id="viewCacheStatsBtn" class="btn btn-secondary">View Stats</button>
+                </div>
+                <div id="iconScrapeProgress" style="background: var(--background-color); padding: 15px; border-radius: 8px; margin-top: 15px; display: none;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="spinner" style="width: 18px; height: 18px; border: 2px solid var(--border-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <span id="scrapeProgressText">Scraping...</span>
+                    </div>
+                    <div id="scrapeProgressDetail" style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;"></div>
+                </div>
+                <p class="status" id="iconMgmtStatus"></p>
+            </div>
+        </div>
+
+        <!-- TAB: Control -->
+        <div id="tab-control" class="tab-panel">
+            <div class="control-grid">
+                <div class="section-card">
+                    <h3>Screenshot & Refresh</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <button id="captureBtn" class="btn btn-primary">Capture Screenshot</button>
+                        <button id="refreshBtn" class="btn btn-secondary">Refresh Now</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="autoRefreshToggle"> Auto-refresh
+                        </label>
+                        <select id="refreshInterval" style="padding: 6px;">
+                            <option value="1000">1s</option>
+                            <option value="2000">2s</option>
+                            <option value="3000" selected>3s</option>
+                            <option value="5000">5s</option>
+                            <option value="10000">10s</option>
+                        </select>
+                        <label style="display: flex; align-items: center; gap: 5px;">
+                            <input type="checkbox" id="smartRefreshToggle"> Smart
+                        </label>
+                    </div>
+                </div>
+
+                <div class="section-card">
+                    <h3>Interaction Mode</h3>
+                    <div class="button-group-toggle" style="margin-bottom: 15px;">
+                        <input type="radio" name="interactionMode" id="modeTap" value="tap" checked>
+                        <label for="modeTap">Tap</label>
+                        <input type="radio" name="interactionMode" id="modeSwipe" value="swipe">
+                        <label for="modeSwipe">Swipe</label>
+                        <input type="radio" name="interactionMode" id="modeSensor" value="sensor">
+                        <label for="modeSensor">Sensor</label>
+                        <input type="radio" name="interactionMode" id="modeAction" value="action">
+                        <label for="modeAction">Action</label>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="text" id="textInput" placeholder="Type text..." style="flex: 1; padding: 8px;">
+                        <button id="sendTextBtn" class="btn btn-secondary">Send</button>
+                    </div>
+                </div>
+
+                <div class="section-card">
+                    <h3>Hardware Keys</h3>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button id="homeBtn" class="btn btn-secondary btn-sm">Home</button>
+                        <button id="backBtn" class="btn btn-secondary btn-sm">Back</button>
+                        <button id="recentBtn" class="btn btn-secondary btn-sm">Recent</button>
+                        <button id="volumeUpBtn" class="btn btn-secondary btn-sm">Vol+</button>
+                        <button id="volumeDownBtn" class="btn btn-secondary btn-sm">Vol-</button>
+                    </div>
+                </div>
+
+                <div class="section-card">
+                    <h3>Overlay Filters</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 13px;">
+                            <input type="checkbox" id="filterClickable" checked> Clickable
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 13px;">
+                            <input type="checkbox" id="filterNonClickable" checked> Non-Clickable
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 13px;">
+                            <input type="checkbox" id="filterTextLabels" checked> Text Labels
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 13px;">
+                            <input type="checkbox" id="filterMinSize"> Hide Small
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; font-size: 13px;">
+                            <input type="checkbox" id="filterTextOnly"> Text Only
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <canvas id="screenshotCanvas" style="border: 1px solid var(--border-color); border-radius: 8px; max-width: 100%; display: block; cursor: crosshair;"></canvas>
+                <p class="status" id="screenshotStatus"></p>
+            </div>
+        </div>
+
+        <!-- Reconfigure Device Modal -->
+        <div id="reconfigureModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+            <div style="background: var(--card-background, white); padding: 30px; border-radius: 12px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+                <h3 style="margin: 0 0 20px 0; color: var(--text-color);">Configure Device</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                    Device: <strong id="reconfigureDeviceId"></strong>
+                </p>
+
+                <!-- Tab Navigation -->
+                <div style="border-bottom: 2px solid var(--border-color); margin-bottom: 20px;">
+                    <button id="tab-connection" class="config-tab active" style="padding: 10px 20px; background: none; border: none; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); font-weight: 600; cursor: pointer; margin-right: 10px;">
+                        Connection
+                    </button>
+                    <button id="tab-security" class="config-tab" style="padding: 10px 20px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); cursor: pointer;">
+                        Lock Screen Security
+                    </button>
+                </div>
+
+                <!-- Connection Tab Content -->
+                <div id="content-connection" class="tab-content">
+                    <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                        Update the IP address and port for this device.
+                    </p>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px;">New IP Address:</label>
+                        <input type="text" id="newDeviceHost" placeholder="192.168.1.100" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px;">Port:</label>
+                        <input type="number" id="newDevicePort" value="5555" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px;">
+                    </div>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button id="reconfigureCancel" class="btn btn-secondary">Cancel</button>
+                        <button id="reconfigureConfirm" class="btn btn-primary">Reconnect</button>
+                    </div>
+                </div>
+
+                <!-- Security Tab Content -->
+                <div id="content-security" class="tab-content" style="display: none;">
+                    <div id="securityConfigContainer">
+                        <!-- Security config UI will be injected here by device-security.js -->
+                        <p style="text-align: center; color: var(--text-secondary);">Loading security settings...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import APIClient from './js/modules/api-client.js?v=0.0.51';
+        import ScreenshotCapture from './js/modules/screenshot-capture.js?v=0.0.51';
+        import DeviceControl from './js/modules/device-control.js?v=0.0.51';
+        import AutoRefresh from './js/modules/auto-refresh.js?v=0.0.51';
+        import ActivityMonitor from './js/modules/activity-monitor.js?v=0.0.51';
+        import DeviceManager from './js/modules/device-manager.js?v=0.0.51';
+        import OverlayFilters from './js/modules/overlay-filters.js?v=0.0.51';
+        import ElementSelector from './js/modules/element-selector.js?v=0.0.51';
+        import SensorCreator from './js/modules/sensor-creator.js?v=0.0.51';
+        import ActionManager from './js/modules/action-manager.js?v=0.0.51';
+        import IconRenderer from './js/modules/icon-renderer.js?v=0.0.51';
+        import DeviceSecurityUI from './js/modules/device-security.js?v=0.0.51';
+        // Note: ThemeToggle and MobileNav now handled by js/components/navbar.js
+
+        const apiClient = new APIClient();
+        const canvas = document.getElementById('screenshotCanvas');
+        const screenshotCapture = new ScreenshotCapture(apiClient, canvas);
+        const deviceControl = new DeviceControl(apiClient, screenshotCapture);
+        const autoRefresh = new AutoRefresh(screenshotCapture);
+        const activityMonitor = new ActivityMonitor(apiClient);
+        const deviceManager = new DeviceManager(apiClient);
+        const overlayFilters = new OverlayFilters(screenshotCapture);
+        const elementSelector = new ElementSelector(canvas, screenshotCapture);
+        const sensorCreator = new SensorCreator(apiClient);
+        const actionManager = new ActionManager(apiClient);
+        const deviceSecurityUI = new DeviceSecurityUI();
+
+        // Theme and mobile nav now handled by js/components/navbar.js
+
+        // === Tab Navigation ===
+        document.querySelectorAll('.device-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabId = tab.dataset.tab;
+
+                // Update tab buttons
+                document.querySelectorAll('.device-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Update tab panels
+                document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+                document.getElementById(`tab-${tabId}`).classList.add('active');
+
+                // Save active tab to localStorage
+                localStorage.setItem('devices_active_tab', tabId);
+            });
+        });
+
+        // Restore last active tab
+        const savedTab = localStorage.getItem('devices_active_tab');
+        if (savedTab) {
+            const tabBtn = document.querySelector(`.device-tab[data-tab="${savedTab}"]`);
+            if (tabBtn) tabBtn.click();
+        }
+
+        // Enable interactive canvas
+        deviceControl.enableInteractiveCanvas(canvas, (result) => {
+            const status = document.getElementById('screenshotStatus');
+
+            // Pause auto-refresh when user interacts with device
+            if (result.type === 'tap' || result.type === 'swipe') {
+                autoRefresh.pauseTemporarily(3000); // Pause for 3 seconds
+            }
+
+            if (result.error) {
+                status.textContent = `✗ ${result.error}`;
+                status.className = 'status error';
+            } else if (result.type === 'tap') {
+                status.textContent = `✓ Tapped at (${result.x}, ${result.y})`;
+                status.className = 'status success';
+            } else if (result.type === 'swipe') {
+                status.textContent = `✓ Swiped from (${result.from.x}, ${result.from.y}) to (${result.to.x}, ${result.to.y})`;
+                status.className = 'status success';
+            }
+        });
+
+        // Handle interaction mode changes
+        document.querySelectorAll('input[name="interactionMode"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const mode = e.target.value;
+
+                if (mode === 'sensor') {
+                    // Enable sensor creation mode
+                    deviceControl.setMode('none'); // Disable device control
+                    elementSelector.enable((element, elementIndex) => {
+                        // Callback when element is selected
+                        const deviceId = deviceManager.getSelectedDevice();
+                        if (deviceId) {
+                            sensorCreator.show(deviceId, element, elementIndex);
+                        } else {
+                            alert('Please select a device first');
+                        }
+                    });
+                    canvas.style.cursor = 'crosshair';
+                } else if (mode === 'action') {
+                    // Enable action creation mode
+                    deviceControl.setMode('none'); // Disable device control
+                    elementSelector.enable((element, elementIndex) => {
+                        // Callback when element is selected
+                        const deviceId = deviceManager.getSelectedDevice();
+                        if (deviceId) {
+                            showActionCreator(deviceId, element, elementIndex);
+                        } else {
+                            alert('Please select a device first');
+                        }
+                    });
+                    canvas.style.cursor = 'crosshair';
+                } else {
+                    // Normal device control mode
+                    elementSelector.disable();
+                    deviceControl.setMode(mode);
+                    const cursor = mode === 'tap' ? 'crosshair' : 'grab';
+                    canvas.style.cursor = cursor;
+                }
+            });
+        });
+
+        // Initialize overlay filters
+        overlayFilters.init({
+            clickable: 'filterClickable',
+            nonClickable: 'filterNonClickable',
+            textLabels: 'filterTextLabels',
+            hideSmall: 'filterMinSize',
+            textOnly: 'filterTextOnly'
+        });
+
+        // Handle connection type switching
+        document.getElementById('connectionType').addEventListener('change', (e) => {
+            const type = e.target.value;
+
+            // Hide all config sections
+            document.getElementById('tcpConfig').style.display = 'none';
+            document.getElementById('pairingConfig').style.display = 'none';
+            document.getElementById('wirelessConfig').style.display = 'none';
+            document.getElementById('tlsConfig').style.display = 'none';
+
+            // Show relevant config section
+            switch(type) {
+                case 'tcp':
+                    document.getElementById('tcpConfig').style.display = 'block';
+                    document.getElementById('devicePort').value = '5555';
+                    break;
+                case 'wireless':
+                    document.getElementById('tcpConfig').style.display = 'block';
+                    document.getElementById('wirelessConfig').style.display = 'block';
+                    document.getElementById('devicePort').value = '5555';
+                    break;
+                case 'pairing':
+                    // Pairing uses its own config, not TCP config
+                    document.getElementById('pairingConfig').style.display = 'block';
+                    break;
+                case 'tls':
+                    document.getElementById('tcpConfig').style.display = 'block';
+                    document.getElementById('tlsConfig').style.display = 'block';
+                    document.getElementById('devicePort').value = '5555';
+                    break;
+            }
+        });
+
+        // === Saved WiFi Devices (localStorage) ===
+        const SAVED_DEVICES_KEY = 'visual_mapper_saved_devices';
+        const AUTO_RECONNECT_KEY = 'visual_mapper_auto_reconnect';
+
+        // Auto-reconnect preference
+        function getAutoReconnectPreference() {
+            try {
+                return localStorage.getItem(AUTO_RECONNECT_KEY) === 'true';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function setAutoReconnectPreference(enabled) {
+            try {
+                localStorage.setItem(AUTO_RECONNECT_KEY, enabled ? 'true' : 'false');
+                // Also save to backend for server-side auto-reconnect
+                apiClient.post('/settings/auto-reconnect', { enabled: enabled }).catch(e => {
+                    console.warn('[Devices] Could not save auto-reconnect to backend:', e);
+                });
+            } catch (e) {
+                console.error('[Devices] Failed to save auto-reconnect preference:', e);
+            }
+        }
+
+        // Initialize auto-reconnect toggle
+        function initAutoReconnectToggle() {
+            const toggle = document.getElementById('autoReconnectToggle');
+            if (toggle) {
+                toggle.checked = getAutoReconnectPreference();
+                toggle.addEventListener('change', () => {
+                    setAutoReconnectPreference(toggle.checked);
+                    const status = document.getElementById('connectionStatus');
+                    status.textContent = toggle.checked
+                        ? '✓ Auto-reconnect enabled - saved devices will reconnect on startup'
+                        : 'Auto-reconnect disabled';
+                    status.className = 'status ' + (toggle.checked ? 'success' : '');
+                });
+            }
+        }
+
+        // Reconnect all saved devices
+        async function reconnectAllSavedDevices() {
+            const devices = getSavedDevices();
+            if (devices.length === 0) {
+                const status = document.getElementById('connectionStatus');
+                status.textContent = 'No saved devices to reconnect';
+                status.className = 'status warning';
+                return;
+            }
+
+            const status = document.getElementById('connectionStatus');
+            status.textContent = `Reconnecting ${devices.length} saved device(s)...`;
+            status.className = 'status';
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const device of devices) {
+                try {
+                    await apiClient.post('/adb/connect', { host: device.ip, port: device.port });
+                    device.lastConnected = new Date().toISOString();
+                    successCount++;
+                } catch (error) {
+                    console.warn(`[Devices] Failed to reconnect ${device.ip}:${device.port}:`, error);
+                    failCount++;
+                }
+            }
+
+            saveDevicesToStorage(devices);
+            await loadDevices();
+
+            if (failCount === 0) {
+                status.textContent = `✓ All ${successCount} device(s) reconnected successfully`;
+                status.className = 'status success';
+            } else {
+                status.textContent = `Reconnected ${successCount}/${devices.length} devices (${failCount} failed)`;
+                status.className = 'status warning';
+            }
+        }
+
+        function getSavedDevices() {
+            try {
+                const saved = localStorage.getItem(SAVED_DEVICES_KEY);
+                return saved ? JSON.parse(saved) : [];
+            } catch (e) {
+                console.error('[Devices] Failed to load saved devices:', e);
+                return [];
+            }
+        }
+
+        function saveDevicesToStorage(devices) {
+            try {
+                localStorage.setItem(SAVED_DEVICES_KEY, JSON.stringify(devices));
+            } catch (e) {
+                console.error('[Devices] Failed to save devices:', e);
+            }
+        }
+
+        function saveWifiDevice(deviceId, name = '') {
+            // Parse IP:PORT from device ID
+            const ipMatch = deviceId.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)$/);
+            if (!ipMatch) return false;
+
+            const devices = getSavedDevices();
+            const existing = devices.find(d => d.ip === ipMatch[1] && d.port === parseInt(ipMatch[2]));
+
+            if (!existing) {
+                devices.push({
+                    ip: ipMatch[1],
+                    port: parseInt(ipMatch[2]),
+                    name: name || `Android (${ipMatch[1]})`,
+                    lastConnected: new Date().toISOString(),
+                    deviceId: deviceId
+                });
+                saveDevicesToStorage(devices);
+                updateSavedDevicesList();
+                return true;
+            } else {
+                // Update last connected time
+                existing.lastConnected = new Date().toISOString();
+                saveDevicesToStorage(devices);
+                return false;
+            }
+        }
+
+        function forgetSavedDevice(ip, port) {
+            const devices = getSavedDevices();
+            const filtered = devices.filter(d => !(d.ip === ip && d.port === port));
+            saveDevicesToStorage(filtered);
+            updateSavedDevicesList();
+        }
+
+        // Per-device auto-reconnect settings
+        const DEVICE_AUTO_RECONNECT_KEY = 'visual_mapper_device_auto_reconnect';
+
+        function getDeviceAutoReconnectSettings() {
+            try {
+                const saved = localStorage.getItem(DEVICE_AUTO_RECONNECT_KEY);
+                return saved ? JSON.parse(saved) : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function setDeviceAutoReconnect(stableDeviceId, enabled) {
+            const settings = getDeviceAutoReconnectSettings();
+            settings[stableDeviceId] = enabled;
+            try {
+                localStorage.setItem(DEVICE_AUTO_RECONNECT_KEY, JSON.stringify(settings));
+                // Also save to backend
+                apiClient.post('/settings/saved-devices/add', {
+                    ip: '', port: 0, deviceId: stableDeviceId, autoReconnect: enabled
+                }).catch(() => {});
+            } catch (e) {
+                console.error('[Devices] Failed to save device auto-reconnect:', e);
+            }
+        }
+
+        function isDeviceAutoReconnectEnabled(stableDeviceId) {
+            const settings = getDeviceAutoReconnectSettings();
+            return settings[stableDeviceId] === true;
+        }
+
+        async function updateSavedDevicesList() {
+            const savedList = document.getElementById('savedDevicesList');
+            const noDevicesMsg = document.getElementById('noSavedDevices');
+            const connectedDevices = deviceManager.getDevices().map(d => d.id);
+
+            // Fetch known devices from identity API
+            let knownDevices = [];
+            try {
+                const response = await apiClient.get('/adb/known-devices');
+                knownDevices = response.devices || [];
+            } catch (e) {
+                console.warn('[Devices] Could not load known devices:', e);
+            }
+
+            // Also merge with localStorage saved devices
+            const localSavedDevices = getSavedDevices();
+
+            // Build combined list - known devices take priority
+            const deviceMap = new Map();
+
+            // Add known devices from API
+            knownDevices.forEach(device => {
+                deviceMap.set(device.stable_device_id, {
+                    stableId: device.stable_device_id,
+                    connectionId: device.current_connection,
+                    model: device.model,
+                    manufacturer: device.manufacturer,
+                    lastSeen: device.last_seen,
+                    source: 'identity'
+                });
+            });
+
+            // Add/merge localStorage devices
+            localSavedDevices.forEach(device => {
+                const connectionId = `${device.ip}:${device.port}`;
+                // Check if already in map by connectionId
+                let found = false;
+                for (const [id, d] of deviceMap) {
+                    if (d.connectionId === connectionId) {
+                        d.name = device.name; // Merge name from localStorage
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    deviceMap.set(connectionId, {
+                        stableId: connectionId,
+                        connectionId: connectionId,
+                        model: device.name || connectionId,
+                        lastSeen: device.lastConnected,
+                        source: 'local',
+                        ip: device.ip,
+                        port: device.port
+                    });
+                }
+            });
+
+            const devices = Array.from(deviceMap.values());
+
+            if (devices.length === 0) {
+                savedList.innerHTML = '';
+                noDevicesMsg.style.display = 'block';
+                return;
+            }
+
+            noDevicesMsg.style.display = 'none';
+
+            const html = devices.map(device => {
+                const isConnected = connectedDevices.includes(device.connectionId);
+                const lastSeen = device.lastSeen ? new Date(device.lastSeen).toLocaleDateString() : 'Unknown';
+                const statusBadge = isConnected
+                    ? '<span style="background: #4CAF50; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;">● Online</span>'
+                    : '<span style="background: #f44336; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;">● Offline</span>';
+
+                const hasReconnectable = device.connectionId && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$/.test(device.connectionId);
+                const autoReconnectEnabled = isDeviceAutoReconnectEnabled(device.stableId);
+                const toggleId = `auto-reconnect-${device.stableId.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+                return `
+                    <div style="padding: 12px; border: 1px solid ${isConnected ? '#4CAF50' : 'var(--border-color)'}; margin-bottom: 8px; border-radius: 8px; background: var(--card-background); ${isConnected ? 'border-left: 3px solid #4CAF50;' : 'border-left: 3px solid #f44336;'}">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+                            <div style="flex: 1; min-width: 200px;">
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                                    <strong style="color: var(--text-color);">${device.model || device.stableId}</strong>
+                                    ${statusBadge}
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+                                    <code style="background: var(--background-color); padding: 2px 6px; border-radius: 3px;">${device.stableId}</code>
+                                    ${device.connectionId && device.connectionId !== device.stableId ? `<span style="margin-left: 8px;">IP: <code style="background: var(--background-color); padding: 2px 6px; border-radius: 3px;">${device.connectionId}</code></span>` : ''}
+                                    <span style="margin-left: 8px;">Last seen: ${lastSeen}</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+                                        <input type="checkbox" id="${toggleId}" ${autoReconnectEnabled ? 'checked' : ''} onchange="window.toggleDeviceAutoReconnect('${device.stableId}', this.checked)" style="width: 16px; height: 16px; cursor: pointer;">
+                                        Auto-reconnect
+                                    </label>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                ${!isConnected && hasReconnectable
+                                    ? `<button onclick="window.reconnectKnownDevice('${device.connectionId}')" class="btn btn-primary btn-sm" style="white-space: nowrap;">🔌 Reconnect</button>`
+                                    : isConnected
+                                    ? `<button onclick="window.disconnectDevice('${device.connectionId}')" class="btn btn-secondary btn-sm" style="white-space: nowrap;">⏏️ Disconnect</button>`
+                                    : `<span style="font-size: 11px; color: var(--text-secondary);">Pair to reconnect</span>`
+                                }
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            savedList.innerHTML = html;
+        }
+
+        // Handler for per-device auto-reconnect toggle
+        window.toggleDeviceAutoReconnect = (stableDeviceId, enabled) => {
+            setDeviceAutoReconnect(stableDeviceId, enabled);
+            const status = document.getElementById('connectionStatus');
+            status.textContent = enabled
+                ? `✓ Auto-reconnect enabled for this device`
+                : `Auto-reconnect disabled for this device`;
+            status.className = 'status ' + (enabled ? 'success' : '');
+        };
+
+        // Global handlers for saved devices
+        window.reconnectSavedDevice = async (ip, port) => {
+            const status = document.getElementById('connectionStatus');
+            status.textContent = `Reconnecting to ${ip}:${port}...`;
+            status.className = 'status';
+
+            try {
+                const response = await apiClient.post('/adb/connect', { host: ip, port: port });
+                status.textContent = `✓ Reconnected to ${ip}:${port}`;
+                status.className = 'status success';
+
+                // Update last connected time
+                const devices = getSavedDevices();
+                const device = devices.find(d => d.ip === ip && d.port === port);
+                if (device) {
+                    device.lastConnected = new Date().toISOString();
+                    saveDevicesToStorage(devices);
+                }
+
+                await loadDevices();
+            } catch (error) {
+                status.textContent = `✗ Reconnection failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        };
+
+        window.forgetSavedDeviceHandler = (ip, port) => {
+            if (confirm(`Forget saved device ${ip}:${port}? You can re-add it later.`)) {
+                forgetSavedDevice(ip, port);
+            }
+        };
+
+        window.saveDeviceHandler = (deviceId, model) => {
+            const name = prompt('Enter a name for this device (optional):', model || '');
+            if (name !== null) { // User didn't cancel
+                saveWifiDevice(deviceId, name);
+                updateDevicesList(); // Refresh to show "Saved" indicator
+                const status = document.getElementById('connectionStatus');
+                status.textContent = `✓ Device saved for quick reconnection`;
+                status.className = 'status success';
+            }
+        };
+
+        // Edit device name
+        window.editDeviceName = (ip, port) => {
+            const devices = getSavedDevices();
+            const device = devices.find(d => d.ip === ip && d.port === port);
+            if (!device) return;
+
+            const currentName = device.name || `${ip}:${port}`;
+            const newName = prompt('Enter a new name for this device:', currentName);
+
+            if (newName !== null && newName.trim() !== '') {
+                device.name = newName.trim();
+                saveDevicesToStorage(devices);
+                updateSavedDevicesList();
+
+                const status = document.getElementById('connectionStatus');
+                status.textContent = `✓ Device renamed to "${newName.trim()}"`;
+                status.className = 'status success';
+            }
+        };
+
+        // Disconnect a device
+        window.disconnectDevice = async (deviceId) => {
+            const status = document.getElementById('connectionStatus');
+            status.textContent = `Disconnecting ${deviceId}...`;
+            status.className = 'status';
+
+            try {
+                await apiClient.post('/adb/disconnect', { device_id: deviceId });
+                status.textContent = `✓ Disconnected ${deviceId}`;
+                status.className = 'status success';
+                await loadDevices();
+            } catch (error) {
+                status.textContent = `✗ Failed to disconnect: ${error.message}`;
+                status.className = 'status error';
+            }
+        };
+
+        // Load devices using DeviceManager
+        async function loadDevices() {
+            try {
+                await deviceManager.loadDevices();
+                updateDevicesList();
+                updateDeviceSelect();
+                updateSavedDevicesList(); // Also refresh saved devices status
+            } catch (error) {
+                console.error('[Devices] Failed to load devices:', error);
+            }
+        }
+
+        // Update devices list UI
+        function updateDevicesList() {
+            const devicesList = document.getElementById('devicesList');
+            const devices = deviceManager.getDevices();
+
+            if (devices.length === 0) {
+                devicesList.innerHTML = '<p class="status warning">No devices connected</p>';
+                return;
+            }
+
+            const html = devices.map(device => {
+                // Extract current IP:PORT from device ID for reconfigure
+                const ipMatch = device.id.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)$/);
+                const isWifiDevice = ipMatch !== null;
+
+                // Check if already saved
+                const savedDevices = getSavedDevices();
+                const isSaved = isWifiDevice && savedDevices.some(d => d.ip === ipMatch[1] && d.port === parseInt(ipMatch[2]));
+
+                return `
+                    <div style="padding: 15px; border: 1px solid var(--border-color); margin-bottom: 10px; border-radius: 8px; background: var(--card-background); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <strong style="color: var(--text-color);">${device.model || device.id}</strong>
+                            <div style="font-size: 12px; color: var(--text-secondary);">
+                                ${device.id} - ${device.state}
+                                ${isSaved ? ' <span style="color: #4caf50;">★ Saved</span>' : ''}
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            ${isWifiDevice && !isSaved ? `<button onclick="window.saveDeviceHandler('${device.id}', '${device.model || ''}')" class="btn btn-secondary btn-sm" title="Save for quick reconnection">Save</button>` : ''}
+                            ${isWifiDevice ? `<button onclick="window.reconfigureDeviceHandler('${device.id}')" class="btn btn-secondary btn-sm">Reconfigure</button>` : ''}
+                            <button onclick="window.disconnectDeviceHandler('${device.id}')" class="btn btn-sm" style="background: #dc3545; color: white;">Disconnect</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            devicesList.innerHTML = html;
+        }
+
+        // Update device select dropdown
+        function updateDeviceSelect() {
+            const select = document.getElementById('deviceSelect');
+            const currentValue = select.value;
+            const devices = deviceManager.getDevices();
+
+            select.innerHTML = '<option value="">-- Select Device --</option>';
+
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.id;
+
+                // Show model and current activity
+                let displayText = device.model || device.id;
+                if (device.current_activity && device.current_activity !== 'Unknown' && device.current_activity !== 'Offline') {
+                    const appName = device.current_activity.split('/')[0].split('.').pop() || '';
+                    if (appName) {
+                        displayText += ` - Active: ${appName}`;
+                    }
+                }
+
+                option.textContent = displayText;
+                select.appendChild(option);
+            });
+
+            // Restore selection if still valid
+            if (currentValue && deviceManager.hasDevice(currentValue)) {
+                select.value = currentValue;
+                deviceManager.setSelectedDevice(currentValue);
+                deviceControl.setDevice(currentValue);
+            } else if (devices.length === 1) {
+                // Auto-select if only one device
+                select.value = devices[0].id;
+                deviceManager.setSelectedDevice(devices[0].id);
+                deviceControl.setDevice(devices[0].id);
+            }
+        }
+
+        // Handle device selection changes
+        document.getElementById('deviceSelect').addEventListener('change', (e) => {
+            if (e.target.value) {
+                deviceManager.setSelectedDevice(e.target.value);
+                deviceControl.setDevice(e.target.value);
+            }
+        });
+
+        // Connect device
+        // === Network Device Discovery ===
+        document.getElementById('scanNetworkBtn').addEventListener('click', async () => {
+            const scanBtn = document.getElementById('scanNetworkBtn');
+            const scanStatus = document.getElementById('scanStatus');
+            const discoveredContainer = document.getElementById('discoveredDevicesContainer');
+            const discoveredList = document.getElementById('discoveredDevicesList');
+            const noDevicesFound = document.getElementById('noDevicesFound');
+
+            try {
+                // Disable button during scan
+                scanBtn.disabled = true;
+                scanBtn.textContent = '🔍 Scanning...';
+                scanStatus.textContent = 'Scanning network for Android devices...';
+                scanStatus.style.color = 'var(--text-secondary)';
+
+                // Hide previous results
+                discoveredContainer.style.display = 'none';
+                noDevicesFound.style.display = 'none';
+
+                // Call scan API
+                const response = await apiClient.get('/adb/scan');
+
+                console.log('[Network Scan] Found devices:', response);
+
+                if (response.devices && response.devices.length > 0) {
+                    // Show discovered devices
+                    discoveredContainer.style.display = 'block';
+
+                    let html = '<div style="display: grid; gap: 15px;">';
+
+                    for (const device of response.devices) {
+                        const androidVersion = device.android_version || 'Unknown';
+                        const sdkVersion = device.sdk_version ? `(SDK ${device.sdk_version})` : '';
+                        const model = device.model || 'Unknown Model';
+                        const state = device.state === 'connected' ? 'Already Connected' : 'Available';
+                        const stateColor = device.state === 'connected' ? 'var(--success-color)' : 'var(--text-secondary)';
+
+                        // Recommendation badge
+                        let recommendationBadge = '';
+                        let recommendationText = '';
+                        if (device.recommended_method === 'pairing') {
+                            recommendationBadge = '<span style="background: #2196f3; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px;">⚡ Android 11+</span>';
+                            recommendationText = '<p style="margin: 10px 0 5px 0; font-size: 13px; color: var(--text-secondary);">📱 <strong>Recommended:</strong> Use Wireless Pairing (Android 11+) for best security</p>';
+                        } else {
+                            recommendationBadge = '<span style="background: #4CAF50; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; margin-left: 10px;">✓ Legacy TCP</span>';
+                            recommendationText = '<p style="margin: 10px 0 5px 0; font-size: 13px; color: var(--text-secondary);">📱 <strong>Recommended:</strong> Use TCP/IP Connection (Port 5555)</p>';
+                        }
+
+                        html += `
+                            <div style="border: 1px solid var(--border-color); padding: 15px; border-radius: 8px; background: var(--card-background);">
+                                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
+                                    <div style="flex: 1;">
+                                        <strong style="font-size: 16px;">${device.ip}:${device.port}</strong>
+                                        ${recommendationBadge}
+                                        <br>
+                                        <span style="color: var(--text-secondary); font-size: 13px;">
+                                            📱 ${model} | Android ${androidVersion} ${sdkVersion}
+                                        </span>
+                                        <br>
+                                        <span style="color: ${stateColor}; font-size: 12px; font-weight: bold;">
+                                            ${state}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                ${recommendationText}
+
+                                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                                    ${device.state === 'connected' ? '' : `
+                                        <button class="btn btn-primary quick-connect-btn"
+                                                data-ip="${device.ip}"
+                                                data-port="${device.port}"
+                                                data-method="${device.recommended_method}"
+                                                style="padding: 6px 12px; font-size: 13px;">
+                                            ⚡ Quick Connect (${device.recommended_method === 'pairing' ? 'Pairing' : 'TCP'})
+                                        </button>
+                                        ${device.recommended_method === 'pairing' ? `
+                                            <button class="btn btn-secondary try-tcp-btn"
+                                                    data-ip="${device.ip}"
+                                                    data-port="${device.port}"
+                                                    style="padding: 6px 12px; font-size: 13px;">
+                                                🔄 Try TCP Instead
+                                            </button>
+                                        ` : `
+                                            <button class="btn btn-secondary try-pairing-btn"
+                                                    data-ip="${device.ip}"
+                                                    data-port="${device.port}"
+                                                    style="padding: 6px 12px; font-size: 13px;">
+                                                🔄 Try Pairing Instead
+                                            </button>
+                                        `}
+                                    `}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    html += '</div>';
+                    discoveredList.innerHTML = html;
+
+                    // Add event listeners for quick connect buttons
+                    document.querySelectorAll('.quick-connect-btn').forEach(btn => {
+                        btn.addEventListener('click', async (e) => {
+                            const ip = e.target.dataset.ip;
+                            const port = e.target.dataset.port;
+                            const method = e.target.dataset.method;
+
+                            if (method === 'pairing') {
+                                // Pre-fill pairing form
+                                document.getElementById('connectionType').value = 'pairing';
+                                document.getElementById('connectionType').dispatchEvent(new Event('change'));
+                                document.getElementById('pairingHost').value = ip;
+                                alert('Please enable Wireless Debugging on your device and enter the pairing code and ports shown on the device.');
+                            } else {
+                                // Direct TCP connection
+                                try {
+                                    btn.disabled = true;
+                                    btn.textContent = 'Connecting...';
+
+                                    const response = await apiClient.post('/adb/connect', {
+                                        host: ip,
+                                        port: parseInt(port)
+                                    });
+
+                                    btn.textContent = '✓ Connected!';
+                                    btn.style.background = 'var(--success-color)';
+
+                                    // Refresh device list
+                                    setTimeout(() => loadDevices(), 500);
+                                } catch (err) {
+                                    btn.disabled = false;
+                                    btn.textContent = '❌ Failed';
+                                    alert('Connection failed: ' + (err.detail || err.message));
+                                }
+                            }
+                        });
+                    });
+
+                    // Add event listeners for "Try alternative method" buttons
+                    document.querySelectorAll('.try-tcp-btn, .try-pairing-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const ip = e.target.dataset.ip;
+                            const port = e.target.dataset.port;
+                            const isTryingPairing = e.target.classList.contains('try-pairing-btn');
+
+                            if (isTryingPairing) {
+                                // Switch to pairing mode
+                                document.getElementById('connectionType').value = 'pairing';
+                                document.getElementById('connectionType').dispatchEvent(new Event('change'));
+                                document.getElementById('pairingHost').value = ip;
+                                alert('Switched to Pairing mode. Please enable Wireless Debugging on your device and enter the pairing code and ports.');
+                            } else {
+                                // Switch to TCP mode
+                                document.getElementById('connectionType').value = 'tcp';
+                                document.getElementById('connectionType').dispatchEvent(new Event('change'));
+                                document.getElementById('deviceHost').value = ip;
+                                document.getElementById('devicePort').value = port;
+                            }
+
+                            // Scroll to connection form
+                            document.querySelector('.card h2').scrollIntoView({ behavior: 'smooth' });
+                        });
+                    });
+
+                    scanStatus.textContent = `✓ Found ${response.devices.length} device(s) in ${response.scan_duration_ms}ms`;
+                    scanStatus.style.color = 'var(--success-color)';
+                } else {
+                    // No devices found
+                    noDevicesFound.style.display = 'block';
+                    scanStatus.textContent = '✗ No devices found on network';
+                    scanStatus.style.color = 'var(--error-color)';
+                }
+
+            } catch (error) {
+                console.error('[Network Scan] Error:', error);
+                scanStatus.textContent = '✗ Scan failed: ' + (error.detail || error.message);
+                scanStatus.style.color = 'var(--error-color)';
+            } finally {
+                // Re-enable button
+                scanBtn.disabled = false;
+                scanBtn.textContent = '🔍 Scan Network';
+            }
+        });
+
+        // Shared connection handler for both connectBtn and pairBtn
+        async function handleConnect() {
+            const connectionType = document.getElementById('connectionType').value;
+            const status = document.getElementById('connectionStatus');
+
+            try {
+                if (connectionType === 'pairing') {
+                    // Wireless pairing flow (Android 11+)
+                    const pairingCode = document.getElementById('pairingCode').value.trim();
+                    const pairingHost = document.getElementById('pairingHost').value.trim();
+                    const pairingPort = parseInt(document.getElementById('pairingPort').value);
+                    const connectionPort = parseInt(document.getElementById('connectionPort').value);
+
+                    if (!pairingCode || !pairingHost || !pairingPort || !connectionPort) {
+                        status.textContent = 'Please fill in all pairing fields (code, IP, pairing port, and connection port)';
+                        status.className = 'status error';
+                        return;
+                    }
+
+                    if (pairingCode.length !== 6 || !/^\d+$/.test(pairingCode)) {
+                        status.textContent = 'Pairing code must be exactly 6 digits';
+                        status.className = 'status error';
+                        return;
+                    }
+
+                    status.textContent = `Pairing with ${pairingHost}:${pairingPort}...`;
+                    status.className = 'status';
+
+                    // Call pairing API with both ports
+                    const response = await apiClient.post('/adb/pair', {
+                        pairing_host: pairingHost,
+                        pairing_port: pairingPort,
+                        pairing_code: pairingCode,
+                        connection_port: connectionPort
+                    });
+
+                    status.textContent = `✓ Paired and connected: ${response.device_id}`;
+                    status.className = 'status success';
+
+                    // Reload devices list
+                    await loadDevices();
+
+                } else {
+                    // Standard TCP connection (legacy, wireless, or TLS)
+                    const host = document.getElementById('deviceHost').value.trim();
+                    const port = parseInt(document.getElementById('devicePort').value);
+
+                    if (!host) {
+                        status.textContent = 'Please enter device IP address';
+                        status.className = 'status error';
+                        return;
+                    }
+
+                    let connectionDesc = 'TCP/IP';
+                    if (connectionType === 'wireless') {
+                        connectionDesc = 'Wireless ADB (Android 11+)';
+                    } else if (connectionType === 'tls') {
+                        connectionDesc = 'TLS/Secure ADB';
+                    }
+
+                    status.textContent = `Connecting via ${connectionDesc} to ${host}:${port}...`;
+                    status.className = 'status';
+
+                    const response = await apiClient.connectDevice(host, port);
+
+                    status.textContent = `✓ Connected: ${response.device_id} (${connectionDesc})`;
+                    status.className = 'status success';
+
+                    // Reload devices list
+                    await loadDevices();
+                }
+
+            } catch (error) {
+                status.textContent = `✗ Connection failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        // Connect button (for TCP/Wireless modes)
+        document.getElementById('connectBtn').addEventListener('click', handleConnect);
+
+        // Pair button (for Pairing mode)
+        document.getElementById('pairBtn').addEventListener('click', handleConnect);
+
+        // Disconnect device handler (exposed globally for inline onclick)
+        window.disconnectDeviceHandler = async (deviceId) => {
+            try {
+                await deviceManager.disconnect(deviceId);
+                await loadDevices();
+            } catch (error) {
+                console.error('[Devices] Disconnect failed:', error);
+                alert(`Disconnect failed: ${error.message}`);
+            }
+        };
+
+        // Tab switching for reconfigure modal
+        function switchConfigTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.config-tab').forEach(tab => {
+                tab.classList.remove('active');
+                tab.style.borderBottom = '2px solid transparent';
+                tab.style.color = 'var(--text-secondary)';
+                tab.style.fontWeight = '400';
+            });
+
+            const activeTab = document.getElementById(`tab-${tabName}`);
+            if (activeTab) {
+                activeTab.classList.add('active');
+                activeTab.style.borderBottom = '2px solid var(--primary-color)';
+                activeTab.style.color = 'var(--primary-color)';
+                activeTab.style.fontWeight = '600';
+            }
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.style.display = 'none';
+            });
+
+            const activeContent = document.getElementById(`content-${tabName}`);
+            if (activeContent) {
+                activeContent.style.display = 'block';
+            }
+        }
+
+        // Attach tab click handlers
+        document.getElementById('tab-connection').addEventListener('click', () => switchConfigTab('connection'));
+        document.getElementById('tab-security').addEventListener('click', () => switchConfigTab('security'));
+
+        // Reconfigure device handler
+        let reconfigureOldDeviceId = null;
+
+        window.reconfigureDeviceHandler = async (deviceId) => {
+            // Parse current IP:PORT from device ID
+            const ipMatch = deviceId.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):?(\d+)?$/);
+            if (!ipMatch) {
+                alert('Cannot reconfigure this device type. Only WiFi (IP:PORT) devices can be reconfigured.');
+                return;
+            }
+
+            const currentIp = ipMatch[1];
+            const currentPort = ipMatch[2] || '5555';
+
+            reconfigureOldDeviceId = deviceId;
+            document.getElementById('reconfigureDeviceId').textContent = deviceId;
+            document.getElementById('newDeviceHost').value = currentIp;
+            document.getElementById('newDevicePort').value = currentPort;
+
+            // Reset to connection tab
+            switchConfigTab('connection');
+
+            // Initialize security UI for this device with callbacks to close modal
+            const securityContainer = document.getElementById('securityConfigContainer');
+            if (securityContainer) {
+                await deviceSecurityUI.initialize(deviceId, securityContainer, {
+                    onSave: () => {
+                        // Close modal after successful save
+                        document.getElementById('reconfigureModal').style.display = 'none';
+                        reconfigureOldDeviceId = null;
+                    },
+                    onCancel: () => {
+                        // Close modal on cancel
+                        document.getElementById('reconfigureModal').style.display = 'none';
+                        reconfigureOldDeviceId = null;
+                    }
+                });
+            }
+
+            document.getElementById('reconfigureModal').style.display = 'flex';
+        };
+
+        // Reconfigure modal handlers
+        document.getElementById('reconfigureCancel').addEventListener('click', () => {
+            document.getElementById('reconfigureModal').style.display = 'none';
+            reconfigureOldDeviceId = null;
+        });
+
+        document.getElementById('reconfigureConfirm').addEventListener('click', async () => {
+            const newHost = document.getElementById('newDeviceHost').value.trim();
+            const newPort = parseInt(document.getElementById('newDevicePort').value);
+
+            if (!newHost || !newPort) {
+                alert('Please enter a valid IP address and port');
+                return;
+            }
+
+            const status = document.getElementById('connectionStatus');
+
+            try {
+                // Disconnect old device first
+                if (reconfigureOldDeviceId) {
+                    status.textContent = `Disconnecting ${reconfigureOldDeviceId}...`;
+                    status.className = 'status';
+                    try {
+                        await deviceManager.disconnect(reconfigureOldDeviceId);
+                    } catch (e) {
+                        console.warn('[Devices] Disconnect during reconfigure:', e);
+                    }
+                }
+
+                // Connect with new settings
+                status.textContent = `Connecting to ${newHost}:${newPort}...`;
+                await apiClient.post('/adb/connect', { host: newHost, port: newPort });
+
+                status.textContent = `✓ Reconnected to ${newHost}:${newPort}`;
+                status.className = 'status success';
+
+                document.getElementById('reconfigureModal').style.display = 'none';
+                reconfigureOldDeviceId = null;
+
+                // Reload devices
+                await loadDevices();
+            } catch (error) {
+                status.textContent = `✗ Reconfigure failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        });
+
+        // Close modal on backdrop click
+        document.getElementById('reconfigureModal').addEventListener('click', (e) => {
+            if (e.target.id === 'reconfigureModal') {
+                document.getElementById('reconfigureModal').style.display = 'none';
+                reconfigureOldDeviceId = null;
+            }
+        });
+
+        // Manual screenshot capture (uses AutoRefresh.captureNow for consistency)
+        let isManualCaptureInProgress = false;  // Prevent double-clicks
+
+        async function captureScreenshot() {
+            // Prevent duplicate calls
+            if (isManualCaptureInProgress) {
+                console.log('[Devices] Capture already in progress, ignoring duplicate click');
+                return;
+            }
+
+            const deviceId = deviceManager.getSelectedDevice();
+            const status = document.getElementById('screenshotStatus');
+
+            if (!deviceId) {
+                status.textContent = 'Please select a device';
+                status.className = 'status error';
+                return;
+            }
+
+            isManualCaptureInProgress = true;
+            status.textContent = 'Capturing screenshot...';
+            status.className = 'status';
+
+            try {
+                await autoRefresh.captureNow(deviceId, (success, result) => {
+                    if (success) {
+                        status.textContent = `✓ Screenshot captured: ${result.elements.length} UI elements detected`;
+                        status.className = 'status success';
+                    } else {
+                        status.textContent = `✗ Capture failed: ${result.message || result}`;
+                        status.className = 'status error';
+                    }
+                });
+            } finally {
+                // Always release lock
+                isManualCaptureInProgress = false;
+            }
+        }
+
+        // Manual capture button
+        document.getElementById('captureBtn').addEventListener('click', captureScreenshot);
+
+        // Manual refresh button
+        document.getElementById('refreshBtn').addEventListener('click', captureScreenshot);
+
+        // Auto-refresh toggle
+        document.getElementById('autoRefreshToggle').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        });
+
+        // Refresh interval change
+        document.getElementById('refreshInterval').addEventListener('change', () => {
+            if (document.getElementById('autoRefreshToggle').checked) {
+                // Restart with new interval
+                stopAutoRefresh();
+                startAutoRefresh();
+            }
+        });
+
+        // Smart refresh (activity monitor) toggle
+        document.getElementById('smartRefreshToggle').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                startSmartRefresh();
+            } else {
+                stopSmartRefresh();
+            }
+        });
+
+        function startAutoRefresh() {
+            const interval = parseInt(document.getElementById('refreshInterval').value);
+            const deviceId = deviceManager.getSelectedDevice();
+            const status = document.getElementById('screenshotStatus');
+
+            if (!deviceId) {
+                status.textContent = 'Please select a device first';
+                status.className = 'status error';
+                document.getElementById('autoRefreshToggle').checked = false;
+                return;
+            }
+
+            status.textContent = `🔄 Auto-refresh enabled (every ${interval/1000}s)`;
+            status.className = 'status';
+
+            autoRefresh.start(interval, deviceId, (success, result) => {
+                if (success) {
+                    const now = new Date().toLocaleTimeString();
+                    status.textContent = `🔄 Auto-refresh: ${result.elements.length} elements (${now})`;
+                    status.className = 'status';
+                } else {
+                    status.textContent = `✗ Auto-refresh failed: ${result.message}`;
+                    status.className = 'status error';
+                }
+            });
+        }
+
+        function stopAutoRefresh() {
+            autoRefresh.stop();
+
+            const status = document.getElementById('screenshotStatus');
+            status.textContent = 'Auto-refresh stopped';
+            status.className = 'status';
+        }
+
+        async function startSmartRefresh() {
+            const deviceId = deviceManager.getSelectedDevice();
+            const status = document.getElementById('screenshotStatus');
+
+            if (!deviceId) {
+                status.textContent = 'Please select a device first';
+                status.className = 'status error';
+                document.getElementById('smartRefreshToggle').checked = false;
+                return;
+            }
+
+            // Use ActivityMonitor's smart refresh method (includes retry logic)
+            await activityMonitor.startSmartRefresh(
+                deviceId,
+                (devId) => screenshotCapture.capture(devId), // Capture function
+                (elementCount, timestamp) => {
+                    // Success callback
+                    status.textContent = `⚡ Smart refresh: ${elementCount} elements (${timestamp})`;
+                    status.className = 'status';
+                }
+            );
+        }
+
+        function stopSmartRefresh() {
+            activityMonitor.stop();
+        }
+
+        // Send text to device
+        document.getElementById('sendTextBtn').addEventListener('click', async () => {
+            const text = document.getElementById('textInput').value;
+            const status = document.getElementById('screenshotStatus');
+
+            if (!text) {
+                status.textContent = 'Please enter text to send';
+                status.className = 'status error';
+                return;
+            }
+
+            try {
+                status.textContent = 'Typing text on device...';
+                status.className = 'status';
+
+                await deviceControl.typeText(text);
+
+                status.textContent = `✓ Typed ${text.length} characters`;
+                status.className = 'status success';
+
+                // Clear input
+                document.getElementById('textInput').value = '';
+
+            } catch (error) {
+                status.textContent = `✗ Text input failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        });
+
+        // Hardware key event helper
+        async function sendKeyEvent(keycode, keyName) {
+            const deviceId = document.getElementById('deviceSelect').value;
+            const status = document.getElementById('screenshotStatus');
+
+            if (!deviceId) {
+                status.textContent = 'Please select a device';
+                status.className = 'status error';
+                return;
+            }
+
+            try {
+                status.textContent = `Sending ${keyName}...`;
+                status.className = 'status';
+
+                await apiClient.post('/adb/keyevent', {
+                    device_id: deviceId,
+                    keycode: keycode
+                });
+
+                status.textContent = `✓ Sent ${keyName}`;
+                status.className = 'status success';
+
+            } catch (error) {
+                status.textContent = `✗ ${keyName} failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        // Hardware key buttons
+        document.getElementById('homeBtn').addEventListener('click', () => sendKeyEvent('KEYCODE_HOME', 'Home'));
+        document.getElementById('backBtn').addEventListener('click', () => sendKeyEvent('KEYCODE_BACK', 'Back'));
+        document.getElementById('recentBtn').addEventListener('click', () => sendKeyEvent('KEYCODE_APP_SWITCH', 'Recent Apps'));
+        document.getElementById('volumeUpBtn').addEventListener('click', () => sendKeyEvent('KEYCODE_VOLUME_UP', 'Volume Up'));
+        document.getElementById('volumeDownBtn').addEventListener('click', () => sendKeyEvent('KEYCODE_VOLUME_DOWN', 'Volume Down'));
+
+        // App Launcher functionality
+        let allApps = [];
+        let filteredApps = [];
+
+        async function loadApps() {
+            const deviceId = document.getElementById('deviceSelect').value;
+            const appSelect = document.getElementById('appSelect');
+            const status = document.getElementById('appLauncherStatus');
+
+            if (!deviceId) {
+                appSelect.innerHTML = '<option value="">Select device above and click \'Load Apps\'...</option>';
+                allApps = [];
+                filteredApps = [];
+                status.textContent = '❌ Please select a device from the dropdown above';
+                status.className = 'status error';
+                return;
+            }
+
+            try {
+                status.textContent = 'Loading apps...';
+                status.className = 'status';
+
+                const response = await apiClient.get(`/adb/apps/${deviceId}`);
+                allApps = response.apps || [];
+
+                if (allApps.length === 0) {
+                    status.textContent = '❌ No apps found on device. Device may be offline or ADB permissions denied.';
+                    status.className = 'status error';
+                    appSelect.innerHTML = '<option value="">No apps available</option>';
+                    return;
+                }
+
+                console.log(`[AppLauncher] Loaded ${allApps.length} apps for ${deviceId}`);
+
+                // Apply filters
+                filterAndDisplayApps();
+
+                const filteredCount = filteredApps.length;
+                status.textContent = `✅ Loaded ${allApps.length} apps (${filteredCount} shown after filters)`;
+                status.className = 'status success';
+            } catch (error) {
+                console.error('[AppLauncher] Failed to load apps:', error);
+                status.textContent = `❌ Failed to load apps: ${error.message}. Check device connection and ADB permissions.`;
+                status.className = 'status error';
+                appSelect.innerHTML = '<option value="">Failed to load apps</option>';
+                allApps = [];
+                filteredApps = [];
+            }
+        }
+
+        function filterAndDisplayApps() {
+            const appSelect = document.getElementById('appSelect');
+            const searchResultsDiv = document.getElementById('appSearchResults');
+            const showSystem = document.getElementById('showSystemApps').checked;
+            const searchTerm = document.getElementById('appSearch').value.toLowerCase();
+            const status = document.getElementById('appLauncherStatus');
+
+            // Filter apps
+            filteredApps = allApps.filter(app => {
+                // System app filter
+                if (!showSystem && app.is_system) {
+                    return false;
+                }
+
+                // Search filter
+                if (searchTerm) {
+                    return app.package.toLowerCase().includes(searchTerm) ||
+                           app.label.toLowerCase().includes(searchTerm);
+                }
+
+                return true;
+            });
+
+            // Sort by label
+            filteredApps.sort((a, b) => a.label.localeCompare(b.label));
+
+            // Show live search results preview (only when searching)
+            if (searchTerm && allApps.length > 0) {
+                searchResultsDiv.style.display = 'block';
+
+                if (filteredApps.length === 0) {
+                    searchResultsDiv.innerHTML = '<div style="padding: 15px; text-align: center; color: var(--text-secondary);">No apps match your search</div>';
+                } else {
+                    // Show first 10 results as clickable list
+                    const resultsToShow = filteredApps.slice(0, 10);
+                    let resultsHtml = `<div style="padding: 8px; background: var(--preview-background); border-bottom: 1px solid var(--border-color); font-weight: bold;">Found ${filteredApps.length} app${filteredApps.length !== 1 ? 's' : ''} matching "${searchTerm}"</div>`;
+
+                    resultsToShow.forEach(app => {
+                        const systemBadge = app.is_system ? '<span style="background: #9E9E9E; color: white; padding: 1px 5px; border-radius: 2px; font-size: 10px; margin-left: 5px;">SYSTEM</span>' : '';
+                        resultsHtml += `
+                            <div style="padding: 10px; border-bottom: 1px solid var(--border-color); cursor: pointer; transition: background 0.2s;"
+                                 onmouseover="this.style.background='var(--preview-background)'"
+                                 onmouseout="this.style.background='var(--card-background)'"
+                                 onclick="window.selectAndLaunchApp('${app.package}')">
+                                <div style="font-weight: bold;">${app.label}${systemBadge}</div>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${app.package}</div>
+                            </div>
+                        `;
+                    });
+
+                    if (filteredApps.length > 10) {
+                        resultsHtml += `<div style="padding: 10px; text-align: center; color: var(--text-secondary); font-size: 12px;">... and ${filteredApps.length - 10} more</div>`;
+                    }
+
+                    searchResultsDiv.innerHTML = resultsHtml;
+                }
+            } else {
+                searchResultsDiv.style.display = 'none';
+            }
+
+            // Populate dropdown
+            if (filteredApps.length === 0) {
+                appSelect.innerHTML = '<option value="">No apps match your filters</option>';
+                if (allApps.length > 0 && !searchTerm) {
+                    status.textContent = `⚠️ No apps match filters. Total apps: ${allApps.length}`;
+                    status.className = 'status warning';
+                } else if (searchTerm) {
+                    status.textContent = '';
+                }
+                return;
+            }
+
+            // Show filter results in placeholder with count
+            const placeholderText = searchTerm
+                ? `-- Found ${filteredApps.length} app${filteredApps.length !== 1 ? 's' : ''} matching "${searchTerm}" --`
+                : `-- Select an app to launch (${filteredApps.length} available) --`;
+
+            appSelect.innerHTML = `<option value="">${placeholderText}</option>`;
+
+            filteredApps.forEach(app => {
+                const option = document.createElement('option');
+                option.value = app.package;
+                option.textContent = `${app.label} (${app.package})`;
+                appSelect.appendChild(option);
+            });
+
+            // Update status with filter count (only when not searching, since results box shows it)
+            if (!searchTerm && allApps.length > 0 && filteredApps.length !== allApps.length) {
+                status.textContent = `✅ Showing ${filteredApps.length} of ${allApps.length} apps`;
+                status.className = 'status success';
+            } else if (!searchTerm) {
+                status.textContent = '';
+            }
+        }
+
+        async function launchApp() {
+            const deviceId = document.getElementById('deviceSelect').value;
+            const packageName = document.getElementById('appSelect').value;
+            const status = document.getElementById('appLauncherStatus');
+
+            if (!deviceId) {
+                status.textContent = '❌ Please select a device from the dropdown above';
+                status.className = 'status error';
+                return;
+            }
+
+            if (!packageName) {
+                status.textContent = '❌ Please select an app to launch';
+                status.className = 'status error';
+                return;
+            }
+
+            try {
+                status.textContent = `Launching ${packageName}...`;
+                status.className = 'status';
+
+                const response = await apiClient.post('/adb/launch', {
+                    device_id: deviceId,
+                    package: packageName
+                });
+
+                if (response.success) {
+                    // Get the app label for better feedback
+                    const app = allApps.find(a => a.package === packageName);
+                    const appLabel = app ? app.label : packageName;
+
+                    status.textContent = `✅ Launched ${appLabel}`;
+                    status.className = 'status success';
+                    console.log(`[AppLauncher] Launched ${packageName} on ${deviceId}`);
+                } else {
+                    status.textContent = `❌ Failed to launch app. App may not support launching or device is offline.`;
+                    status.className = 'status error';
+                }
+            } catch (error) {
+                console.error('[AppLauncher] Failed to launch app:', error);
+                status.textContent = `❌ Failed to launch app: ${error.message}. Device may be offline.`;
+                status.className = 'status error';
+            }
+        }
+
+        // Helper function to select and launch app from search results
+        window.selectAndLaunchApp = async function(packageName) {
+            const appSelect = document.getElementById('appSelect');
+            appSelect.value = packageName;
+            await launchApp();
+        };
+
+        // Smart search - auto-load apps when user starts typing
+        document.getElementById('appSearch').addEventListener('input', async (e) => {
+            const searchTerm = e.target.value.trim();
+
+            // If user is typing but apps haven't been loaded yet, auto-load them
+            if (searchTerm && allApps.length === 0) {
+                const deviceId = document.getElementById('deviceSelect').value;
+                if (deviceId) {
+                    // Auto-load apps in background
+                    await loadApps();
+                } else {
+                    // Show message that device needs to be selected
+                    const searchResultsDiv = document.getElementById('appSearchResults');
+                    searchResultsDiv.style.display = 'block';
+                    searchResultsDiv.innerHTML = '<div style="padding: 15px; text-align: center; color: var(--text-secondary);">⚠️ Please select a device above first</div>';
+                }
+            } else {
+                // Normal filtering
+                filterAndDisplayApps();
+            }
+        });
+
+        // App launcher event listeners
+        document.getElementById('showSystemApps').addEventListener('change', filterAndDisplayApps);
+        document.getElementById('refreshAppsBtn').addEventListener('click', loadApps);
+        document.getElementById('launchAppBtn').addEventListener('click', launchApp);
+
+        // Action Creator - Simple prompt-based action creation
+        async function showActionCreator(deviceId, element, elementIndex) {
+            const status = document.getElementById('screenshotStatus');
+
+            // Get center coordinates of the selected element
+            // Handle both bounds object format and direct coordinate properties
+            let centerX, centerY;
+
+            if (element.bounds && typeof element.bounds === 'object') {
+                // Bounds object format: {x, y, width, height}
+                centerX = Math.round(element.bounds.x + element.bounds.width / 2);
+                centerY = Math.round(element.bounds.y + element.bounds.height / 2);
+            } else if (element.x !== undefined && element.y !== undefined) {
+                // Direct coordinate format
+                centerX = Math.round(element.x + (element.width || 0) / 2);
+                centerY = Math.round(element.y + (element.height || 0) / 2);
+            } else {
+                // Fallback: use element position if available
+                console.error('[ActionCreator] Element has invalid bounds:', element);
+                status.textContent = '✗ Cannot create action: element bounds are invalid';
+                status.className = 'status error';
+                return;
+            }
+
+            // Validate coordinates are numbers
+            if (isNaN(centerX) || isNaN(centerY)) {
+                console.error('[ActionCreator] Invalid coordinates:', { centerX, centerY, element });
+                status.textContent = '✗ Cannot create action: invalid coordinates';
+                status.className = 'status error';
+                return;
+            }
+
+            // Prompt for action name
+            const actionName = prompt(
+                `Create Action for Element:\n\n` +
+                `Text: ${element.text || 'N/A'}\n` +
+                `Class: ${element.class || 'N/A'}\n` +
+                `Position: (${centerX}, ${centerY})\n\n` +
+                `Enter action name:`
+            );
+
+            if (!actionName || actionName.trim() === '') {
+                status.textContent = 'Action creation cancelled';
+                status.className = 'status';
+                return;
+            }
+
+            try {
+                status.textContent = 'Creating tap action...';
+                status.className = 'status';
+
+                // Set device ID on action manager
+                actionManager.setDevice(deviceId);
+
+                // Create tap action
+                const actionConfig = {
+                    action_type: 'tap',
+                    name: actionName.trim(),
+                    description: `Tap on "${element.text || element.class}" at (${centerX}, ${centerY})`,
+                    device_id: deviceId,
+                    x: centerX,
+                    y: centerY,
+                    enabled: true
+                };
+
+                const tags = [element.class ? `class:${element.class}` : 'ui-element'];
+
+                const result = await actionManager.createAction(actionConfig, tags);
+
+                status.textContent = `✓ Action "${actionName.trim()}" created successfully! View it on the Actions page.`;
+                status.className = 'status success';
+
+                console.log('[ActionCreator] Created action:', result);
+
+                // Switch back to tap mode
+                document.getElementById('modeTap').checked = true;
+                document.getElementById('modeTap').dispatchEvent(new Event('change'));
+
+            } catch (error) {
+                console.error('[ActionCreator] Failed to create action:', error);
+                status.textContent = `✗ Failed to create action: ${error.message}`;
+                status.className = 'status error';
+            }
+        }
+
+        // ========== Icon Management (Phase 8 Enhancement) ==========
+
+        // Helper function to get API base
+        const getApiBase = () => '/api';
+
+        // Check Icon Cache Button
+        document.getElementById('checkIconCacheBtn').addEventListener('click', async () => {
+            const deviceId = deviceManager.getSelectedDevice();
+            const status = document.getElementById('iconMgmtStatus');
+            const cacheStatusDiv = document.getElementById('iconCacheStatus');
+
+            if (!deviceId) {
+                status.textContent = 'Please select a device first';
+                status.className = 'status error';
+                return;
+            }
+
+            status.textContent = 'Checking icon cache...';
+            status.className = 'status';
+            cacheStatusDiv.style.display = 'none';
+
+            try {
+                const response = await fetch(`${getApiBase()}/adb/check-icon-cache/${encodeURIComponent(deviceId)}`);
+                const data = await response.json();
+
+                // Update cache status display
+                document.getElementById('iconCount').textContent = data.cache_stats?.total_icons || 0;
+                document.getElementById('cacheSize').textContent = data.cache_stats?.total_size_mb ? `${data.cache_stats.total_size_mb} MB` : '0 MB';
+                document.getElementById('newAppsCount').textContent = data.new_apps_count || 0;
+
+                cacheStatusDiv.style.display = 'block';
+
+                if (data.needs_update) {
+                    status.textContent = `⚠️ ${data.new_apps_count} new app(s) detected. Click "Scrape Device Icons" to update cache.`;
+                    status.className = 'status warning';
+                } else {
+                    status.textContent = `✅ Icon cache is up to date (${data.cache_stats?.total_icons || 0} icons cached)`;
+                    status.className = 'status success';
+                }
+            } catch (error) {
+                console.error('Failed to check icon cache:', error);
+                status.textContent = `✗ Failed to check icon cache: ${error.message}`;
+                status.className = 'status error';
+            }
+        });
+
+        // Scrape Device Icons Button
+        document.getElementById('scrapeIconsBtn').addEventListener('click', async () => {
+            const deviceId = deviceManager.getSelectedDevice();
+            const status = document.getElementById('iconMgmtStatus');
+            const progressDiv = document.getElementById('iconScrapeProgress');
+            const progressText = document.getElementById('scrapeProgressText');
+            const progressDetail = document.getElementById('scrapeProgressDetail');
+
+            if (!deviceId) {
+                status.textContent = 'Please select a device first';
+                status.className = 'status error';
+                return;
+            }
+
+            // Confirm action
+            if (!confirm('This will scrape app icons from the device app drawer. It may take 30-60 seconds. Continue?')) {
+                return;
+            }
+
+            status.textContent = '';
+            progressDiv.style.display = 'block';
+            progressText.textContent = 'Scraping device icons...';
+            progressDetail.textContent = 'Opening app drawer and capturing screenshots...';
+
+            try {
+                const response = await fetch(`${getApiBase()}/adb/scrape-device-icons/${encodeURIComponent(deviceId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                progressDiv.style.display = 'none';
+
+                if (data.success) {
+                    status.textContent = `✅ Successfully scraped ${data.icons_scraped} icons! Cache size: ${data.cache_stats?.total_size_mb || 0} MB`;
+                    status.className = 'status success';
+
+                    // Update cache status display
+                    document.getElementById('iconCount').textContent = data.cache_stats?.total_icons || 0;
+                    document.getElementById('cacheSize').textContent = data.cache_stats?.total_size_mb ? `${data.cache_stats.total_size_mb} MB` : '0 MB';
+                    document.getElementById('newAppsCount').textContent = 0;
+                    document.getElementById('iconCacheStatus').style.display = 'block';
+                } else {
+                    status.textContent = `✗ Icon scraping failed`;
+                    status.className = 'status error';
+                }
+            } catch (error) {
+                console.error('Failed to scrape device icons:', error);
+                progressDiv.style.display = 'none';
+                status.textContent = `✗ Failed to scrape icons: ${error.message}`;
+                status.className = 'status error';
+            }
+        });
+
+        // View Cache Stats Button
+        document.getElementById('viewCacheStatsBtn').addEventListener('click', async () => {
+            const deviceId = deviceManager.getSelectedDevice();
+            const status = document.getElementById('iconMgmtStatus');
+
+            status.textContent = 'Loading cache statistics...';
+            status.className = 'status';
+
+            try {
+                const url = deviceId
+                    ? `${getApiBase()}/adb/icon-cache-stats?device_id=${encodeURIComponent(deviceId)}`
+                    : `${getApiBase()}/adb/icon-cache-stats`;
+
+                const response = await fetch(url);
+                const stats = await response.json();
+
+                // Format stats for display
+                let statsText = '📊 Icon Cache Statistics:\n\n';
+
+                if (stats.device_scraper) {
+                    statsText += `Device-Specific Icons:\n`;
+                    statsText += `  • Icons: ${stats.device_scraper.total_icons || 0}\n`;
+                    statsText += `  • Size: ${stats.device_scraper.total_size_mb || 0} MB\n\n`;
+                }
+
+                if (stats.playstore_scraper) {
+                    statsText += `Play Store Icons:\n`;
+                    statsText += `  • Icons: ${stats.playstore_scraper.total_icons || 0}\n`;
+                    statsText += `  • Size: ${stats.playstore_scraper.total_size_mb || 0} MB\n\n`;
+                }
+
+                if (stats.apk_extractor) {
+                    statsText += `APK Extracted Icons:\n`;
+                    statsText += `  • Icons: ${stats.apk_extractor.total_icons || 0}\n`;
+                    statsText += `  • Size: ${stats.apk_extractor.total_size_mb || 0} MB\n`;
+                }
+
+                alert(statsText);
+                status.textContent = '✅ Statistics loaded';
+                status.className = 'status success';
+            } catch (error) {
+                console.error('Failed to load cache stats:', error);
+                status.textContent = `✗ Failed to load stats: ${error.message}`;
+                status.className = 'status error';
+            }
+        });
+
+        // Reconnect All button handler
+        document.getElementById('reconnectAllBtn').addEventListener('click', reconnectAllSavedDevices);
+
+        // Initialize auto-reconnect toggle
+        initAutoReconnectToggle();
+
+        // Handler for reconnecting known devices
+        window.reconnectKnownDevice = async (connectionId) => {
+            const ipMatch = connectionId.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)$/);
+            if (!ipMatch) {
+                alert('Cannot auto-reconnect. Please use the Connect button instead.');
+                return;
+            }
+
+            const ip = ipMatch[1];
+            const port = parseInt(ipMatch[2]);
+            await window.reconnectSavedDevice(ip, port);
+        };
+
+        // Handler for showing connect form for devices without reconnectable connection
+        window.showConnectForm = (stableDeviceId) => {
+            // Scroll to connection form
+            document.querySelector('.card h2').scrollIntoView({ behavior: 'smooth' });
+
+            // Show hint about device
+            const status = document.getElementById('connectionStatus');
+            status.textContent = `Enter connection details to reconnect device: ${stableDeviceId}`;
+            status.className = 'status';
+        };
+
+        // Initial load
+        loadDevices();
+
+        // Auto-reconnect on page load if enabled
+        if (getAutoReconnectPreference()) {
+            console.log('[Devices] Auto-reconnect enabled, attempting to reconnect saved devices...');
+            setTimeout(() => {
+                reconnectAllSavedDevices();
+            }, 1000); // Delay to allow page to fully load
+        }
+    </script>
+</body>
+</html>

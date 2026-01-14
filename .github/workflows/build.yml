@@ -6,15 +6,30 @@ on:
       - master
     paths:
       - 'visual-mapper/**'
+      - 'visual-mapper-beta/**'
   workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Build target'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - stable
+          - beta
+          - both
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/visual-mapper
+  OWNER: ${{ github.repository_owner }}
 
 jobs:
-  build:
+  # Stable build - visual-mapper/
+  build-stable:
     runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.build_target == 'stable' || github.event.inputs.build_target == 'both') ||
+      github.event_name == 'push'
     permissions:
       contents: read
       packages: write
@@ -35,27 +50,48 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check if stable changed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            # Check if visual-mapper/ files changed
+            git fetch origin ${{ github.event.before }} --depth=1 || true
+            CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- visual-mapper/ | wc -l)
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
       - name: Get version from config.yaml
+        if: steps.check.outputs.changed == 'true'
         id: version
         run: |
           VERSION=$(grep 'version:' visual-mapper/config.yaml | sed 's/version: *"\(.*\)"/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
+          echo "Building STABLE version: $VERSION"
 
       - name: Set up QEMU
+        if: steps.check.outputs.changed == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.check.outputs.changed == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
+        if: steps.check.outputs.changed == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push stable
+        if: steps.check.outputs.changed == 'true'
         uses: docker/build-push-action@v5
         with:
           context: ./visual-mapper
@@ -65,10 +101,90 @@ jobs:
           build-args: |
             BUILD_FROM=${{ matrix.build_from }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/visual-mapper-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/visual-mapper-${{ matrix.arch }}:latest
+          cache-from: type=gha,scope=stable-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=stable-${{ matrix.arch }}
 
-  # update-config job disabled during testing
-  # Re-enable when ready to go public with ghcr.io images
+  # Beta build - visual-mapper-beta/
+  build-beta:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.build_target == 'beta' || github.event.inputs.build_target == 'both') ||
+      github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, aarch64]
+        include:
+          - arch: amd64
+            build_from: ghcr.io/home-assistant/amd64-base:3.18
+            platform: linux/amd64
+          - arch: aarch64
+            build_from: ghcr.io/home-assistant/aarch64-base:3.18
+            platform: linux/arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if beta changed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            # Check if visual-mapper-beta/ files changed
+            git fetch origin ${{ github.event.before }} --depth=1 || true
+            CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- visual-mapper-beta/ | wc -l)
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Get version from config.yaml
+        if: steps.check.outputs.changed == 'true'
+        id: version
+        run: |
+          VERSION=$(grep 'version:' visual-mapper-beta/config.yaml | sed 's/version: *"\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building BETA version: $VERSION"
+
+      - name: Set up QEMU
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push beta
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./visual-mapper-beta
+          file: ./visual-mapper-beta/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          build-args: |
+            BUILD_FROM=${{ matrix.build_from }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/visual-mapper-beta-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/visual-mapper-beta-${{ matrix.arch }}:beta
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/visual-mapper-beta-${{ matrix.arch }}:latest
+          cache-from: type=gha,scope=beta-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=beta-${{ matrix.arch }}

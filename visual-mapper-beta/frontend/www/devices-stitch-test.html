@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="version" content="0.3.1" data-build="2025-12-28">
+    <title>Screenshot Stitching Test - Visual Mapper</title>
+    <link rel="stylesheet" href="css/styles.css?v=0.3.1">
+    <style>
+        .test-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .test-controls label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .test-controls input[type="number"] {
+            width: 80px;
+            padding: 6px;
+        }
+        .result-info {
+            background: var(--preview-background);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .result-info pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .stitched-image {
+            max-width: 100%;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+        }
+        .comparison-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 800px) {
+            .comparison-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        /* Element overlay styles */
+        .screenshot-container {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+        }
+        .element-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .element-box {
+            position: absolute;
+            border: 2px solid rgba(0, 200, 100, 0.7);
+            background: rgba(0, 200, 100, 0.1);
+            pointer-events: auto;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .element-box:hover {
+            border-color: rgba(255, 100, 100, 0.9);
+            background: rgba(255, 100, 100, 0.2);
+            z-index: 10;
+        }
+        .element-box .element-label {
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            font-size: 10px;
+            padding: 2px 4px;
+            white-space: nowrap;
+            display: none;
+            z-index: 100;
+        }
+        .element-box:hover .element-label {
+            display: block;
+        }
+        .overlay-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        .overlay-controls label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+    <script type="module" src="js/init.js?v=0.3.1"></script>
+
+    <div class="container">
+        <div class="card">
+            <h1>Screenshot Stitching Test</h1>
+            <p>Test the OpenCV-based screenshot stitching functionality</p>
+            <p style="color: var(--text-secondary); font-size: 13px;">
+                This page tests the ScreenshotStitcher class which uses OpenCV template matching
+                to combine multiple screenshots into a single full-page capture.
+            </p>
+        </div>
+
+        <!-- Device Selection -->
+        <div class="card">
+            <h2>1. Select Device</h2>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <select id="deviceSelect" style="flex: 1; max-width: 400px; padding: 10px; font-size: 16px;">
+                    <option value="">-- Loading devices... --</option>
+                </select>
+                <button id="refreshDevicesBtn" class="btn btn-secondary">Refresh</button>
+            </div>
+            <p class="status" id="deviceStatus"></p>
+        </div>
+
+        <!-- Stitching Parameters -->
+        <div class="card">
+            <h2>2. Stitching Parameters</h2>
+            <div class="test-controls">
+                <label>
+                    Max Scrolls:
+                    <input type="number" id="maxScrolls" value="5" min="1" max="50">
+                </label>
+                <label>
+                    Scroll Ratio:
+                    <input type="number" id="scrollRatio" value="0.75" min="0.1" max="0.9" step="0.05">
+                </label>
+                <label>
+                    Overlap Ratio:
+                    <input type="number" id="overlapRatio" value="0.25" min="0.1" max="0.5" step="0.05">
+                </label>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 12px;">
+                <strong>Max Scrolls:</strong> Maximum number of scroll operations (safety limit)<br>
+                <strong>Scroll Ratio:</strong> How much of the screen to scroll (0.75 = 75%)<br>
+                <strong>Overlap Ratio:</strong> Overlap region for template matching (0.25 = 25%)
+            </p>
+        </div>
+
+        <!-- Test Actions -->
+        <div class="card">
+            <h2>3. Run Tests</h2>
+            <div class="test-controls">
+                <button id="captureNormalBtn" class="btn btn-secondary">Capture Normal Screenshot</button>
+                <button id="captureStitchedBtn" class="btn">Capture Stitched Screenshot</button>
+            </div>
+            <p class="status" id="testStatus"></p>
+        </div>
+
+        <!-- Results -->
+        <div class="card">
+            <h2>4. Results</h2>
+
+            <div id="resultInfo" class="result-info" style="display: none;">
+                <h3>Stitching Metadata</h3>
+                <pre id="metadataDisplay"></pre>
+            </div>
+
+            <div class="comparison-container">
+                <div>
+                    <h3>Normal Screenshot</h3>
+                    <p id="normalInfo" style="font-size: 12px; color: var(--text-secondary);">Not captured yet</p>
+                    <img id="normalImage" class="stitched-image" style="display: none;">
+                </div>
+                <div>
+                    <h3>Stitched Screenshot</h3>
+                    <p id="stitchedInfo" style="font-size: 12px; color: var(--text-secondary);">Not captured yet</p>
+                    <div class="overlay-controls" id="overlayControls" style="display: none;">
+                        <label>
+                            <input type="checkbox" id="showOverlay" checked>
+                            Show Overlay
+                        </label>
+                        <span style="border-left: 1px solid var(--border-color); padding-left: 10px;">
+                            <strong>Filters:</strong>
+                        </span>
+                        <label>
+                            <input type="checkbox" id="filterClickable" checked> Clickable
+                        </label>
+                        <label>
+                            <input type="checkbox" id="filterNonClickable" checked> Non-Clickable
+                        </label>
+                        <label>
+                            <input type="checkbox" id="filterTextLabels" checked> Text Labels
+                        </label>
+                        <label>
+                            <input type="checkbox" id="filterMinSize"> Hide Small (&lt;50px)
+                        </label>
+                        <label>
+                            <input type="checkbox" id="filterTextOnly"> Text Only
+                        </label>
+                        <span style="border-left: 1px solid var(--border-color); padding-left: 10px;">
+                            <strong>Mode:</strong>
+                        </span>
+                        <label>
+                            <input type="radio" name="interactionMode" id="modeInspect" value="inspect" checked>
+                            Inspect
+                        </label>
+                        <label>
+                            <input type="radio" name="interactionMode" id="modeSensor" value="sensor">
+                            Sensor
+                        </label>
+                        <span id="elementCount" style="font-size: 12px; color: var(--text-secondary); margin-left: auto;"></span>
+                    </div>
+                    <div class="screenshot-container" id="stitchedContainer">
+                        <img id="stitchedImage" class="stitched-image" style="display: none;">
+                        <div class="element-overlay" id="elementOverlay"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Screenshots -->
+        <div class="card" id="debugCard" style="display: none;">
+            <h2>5. Debug: Individual Captures</h2>
+            <p style="color: var(--text-secondary); font-size: 12px; margin-bottom: 15px;">
+                Each screenshot captured during the stitching process. Check for missing content or overlap issues.
+            </p>
+            <div id="debugScreenshots" style="display: flex; flex-wrap: wrap; gap: 15px;"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import APIClient from './js/modules/api-client.js?v=0.0.5';
+        // Note: ThemeToggle and MobileNav now handled by js/components/navbar.js
+        import SensorCreator from './js/modules/sensor-creator.js?v=0.0.5';
+
+        const apiClient = new APIClient();
+        const sensorCreator = new SensorCreator(apiClient);
+
+        // State
+        let selectedDevice = null;
+        let stitchedElements = [];  // Store elements for overlay
+
+        // Get current filter settings
+        function getFilterSettings() {
+            return {
+                showClickable: document.getElementById('filterClickable').checked,
+                showNonClickable: document.getElementById('filterNonClickable').checked,
+                showTextLabels: document.getElementById('filterTextLabels').checked,
+                hideSmall: document.getElementById('filterMinSize').checked,
+                textOnly: document.getElementById('filterTextOnly').checked
+            };
+        }
+
+        // Check if element passes filters
+        function elementPassesFilters(elem, filters) {
+            const isClickable = elem.clickable === 'true' || elem.clickable === true;
+            const hasText = elem.text && elem.text.trim().length > 0;
+
+            // Clickable filter
+            if (isClickable && !filters.showClickable) return false;
+            if (!isClickable && !filters.showNonClickable) return false;
+
+            // Text only filter
+            if (filters.textOnly && !hasText) return false;
+
+            // Text labels filter (elements with text)
+            if (!filters.showTextLabels && hasText) return false;
+
+            return true;
+        }
+
+        // Render element overlays on the stitched image
+        function renderElementOverlay(elements, imageEl) {
+            const overlay = document.getElementById('elementOverlay');
+            const overlayControls = document.getElementById('overlayControls');
+            const elementCount = document.getElementById('elementCount');
+
+            overlay.innerHTML = '';
+
+            if (!elements || elements.length === 0) {
+                overlayControls.style.display = 'none';
+                return;
+            }
+
+            // Get image display dimensions vs actual dimensions
+            const imgRect = imageEl.getBoundingClientRect();
+            const imgNaturalWidth = imageEl.naturalWidth;
+            const imgNaturalHeight = imageEl.naturalHeight;
+            const scaleX = imgRect.width / imgNaturalWidth;
+            const scaleY = imgRect.height / imgNaturalHeight;
+
+            console.log('[StitchTest] Overlay sizing:', {
+                imgRect: { width: imgRect.width, height: imgRect.height },
+                natural: { width: imgNaturalWidth, height: imgNaturalHeight },
+                scale: { x: scaleX, y: scaleY }
+            });
+
+            // Update overlay size to match displayed image
+            overlay.style.width = `${imgRect.width}px`;
+            overlay.style.height = `${imgRect.height}px`;
+
+            // Get filter settings
+            const filters = getFilterSettings();
+            let renderedCount = 0;
+
+            // Render each element as a box
+            elements.forEach((elem, idx) => {
+                const bounds = elem.bounds;
+                let x, y, width, height;
+
+                if (typeof bounds === 'object') {
+                    x = bounds.x || 0;
+                    y = bounds.y || 0;
+                    width = bounds.width || 0;
+                    height = bounds.height || 0;
+                } else if (typeof bounds === 'string') {
+                    // Parse "[x1,y1][x2,y2]" format
+                    const match = bounds.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+                    if (match) {
+                        x = parseInt(match[1]);
+                        y = parseInt(match[2]);
+                        width = parseInt(match[3]) - x;
+                        height = parseInt(match[4]) - y;
+                    } else {
+                        return; // Skip if can't parse
+                    }
+                } else {
+                    return; // Skip
+                }
+
+                // Skip tiny elements
+                if (width < 10 || height < 10) return;
+
+                // Apply hide small filter
+                if (filters.hideSmall && (width < 50 || height < 50)) return;
+
+                // Apply other filters
+                if (!elementPassesFilters(elem, filters)) return;
+
+                // Scale to displayed size
+                const scaledX = x * scaleX;
+                const scaledY = y * scaleY;
+                const scaledWidth = width * scaleX;
+                const scaledHeight = height * scaleY;
+
+                // Create element box
+                const box = document.createElement('div');
+                box.className = 'element-box';
+                box.style.left = `${scaledX}px`;
+                box.style.top = `${scaledY}px`;
+                box.style.width = `${scaledWidth}px`;
+                box.style.height = `${scaledHeight}px`;
+
+                // Color based on clickable status
+                const isClickable = elem.clickable === 'true' || elem.clickable === true;
+                if (isClickable) {
+                    box.style.borderColor = 'rgba(0, 200, 100, 0.7)';
+                    box.style.background = 'rgba(0, 200, 100, 0.1)';
+                } else {
+                    box.style.borderColor = 'rgba(100, 150, 255, 0.7)';
+                    box.style.background = 'rgba(100, 150, 255, 0.1)';
+                }
+
+                // Create label
+                const label = document.createElement('div');
+                label.className = 'element-label';
+                const text = elem.text || '';
+                const resId = elem.resource_id || elem['resource-id'] || '';
+                const className = elem.class || '';
+                label.textContent = text || resId || className || `Element ${idx}`;
+                box.appendChild(label);
+
+                // Handle click based on mode
+                box.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const mode = document.querySelector('input[name="interactionMode"]:checked').value;
+
+                    if (mode === 'sensor') {
+                        // Open sensor creator
+                        sensorCreator.show(selectedDevice, elem, idx);
+                    } else {
+                        // Inspect mode - show element details in console
+                        console.log('[StitchTest] Element clicked:', elem);
+                        alert(`Element: ${text || resId || className}\nClickable: ${isClickable}\nBounds: ${JSON.stringify(bounds)}`);
+                    }
+                });
+
+                overlay.appendChild(box);
+                renderedCount++;
+            });
+
+            // Show controls
+            overlayControls.style.display = 'flex';
+            elementCount.textContent = `${renderedCount} / ${elements.length} elements`;
+
+            console.log(`[StitchTest] Rendered ${renderedCount} of ${elements.length} element overlays`);
+
+            // Debug: log first few element bounds
+            if (elements.length > 0) {
+                console.log('[StitchTest] Sample element bounds:');
+                elements.slice(0, 5).forEach((elem, i) => {
+                    console.log(`  ${i}: bounds=${JSON.stringify(elem.bounds)}, text=${elem.text?.substring(0, 30) || 'N/A'}`);
+                });
+            }
+        }
+
+        // Re-render overlay when filters change
+        ['filterClickable', 'filterNonClickable', 'filterTextLabels', 'filterMinSize', 'filterTextOnly'].forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                if (stitchedElements.length > 0) {
+                    const stitchedImage = document.getElementById('stitchedImage');
+                    renderElementOverlay(stitchedElements, stitchedImage);
+                }
+            });
+        });
+
+        // Toggle overlay visibility
+        document.getElementById('showOverlay').addEventListener('change', (e) => {
+            const overlay = document.getElementById('elementOverlay');
+            overlay.style.display = e.target.checked ? 'block' : 'none';
+        });
+
+        // Load devices
+        async function loadDevices() {
+            const select = document.getElementById('deviceSelect');
+            const status = document.getElementById('deviceStatus');
+
+            try {
+                status.textContent = 'Loading devices...';
+                status.className = 'status';
+
+                const response = await apiClient.get('/adb/devices');
+                const devices = response.devices || [];
+
+                select.innerHTML = '<option value="">-- Select Device --</option>';
+
+                if (devices.length === 0) {
+                    status.textContent = 'No devices connected. Connect a device on the Devices page.';
+                    status.className = 'status warning';
+                    return;
+                }
+
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.id;
+                    option.textContent = `${device.model || device.id} (${device.state})`;
+                    select.appendChild(option);
+                });
+
+                // Auto-select if only one device
+                if (devices.length === 1) {
+                    select.value = devices[0].id;
+                    selectedDevice = devices[0].id;
+                    status.textContent = `✓ Auto-selected: ${devices[0].model || devices[0].id}`;
+                    status.className = 'status success';
+                } else {
+                    status.textContent = `Found ${devices.length} devices. Select one to test.`;
+                    status.className = 'status success';
+                }
+
+            } catch (error) {
+                console.error('[StitchTest] Failed to load devices:', error);
+                status.textContent = `Failed to load devices: ${error.message}`;
+                status.className = 'status error';
+                select.innerHTML = '<option value="">-- Error loading devices --</option>';
+            }
+        }
+
+        // Handle device selection
+        document.getElementById('deviceSelect').addEventListener('change', (e) => {
+            selectedDevice = e.target.value;
+            const status = document.getElementById('deviceStatus');
+            if (selectedDevice) {
+                status.textContent = `Selected: ${selectedDevice}`;
+                status.className = 'status success';
+            }
+        });
+
+        // Refresh devices
+        document.getElementById('refreshDevicesBtn').addEventListener('click', loadDevices);
+
+        // Capture normal screenshot
+        document.getElementById('captureNormalBtn').addEventListener('click', async () => {
+            const status = document.getElementById('testStatus');
+            const normalInfo = document.getElementById('normalInfo');
+            const normalImage = document.getElementById('normalImage');
+
+            if (!selectedDevice) {
+                status.textContent = 'Please select a device first';
+                status.className = 'status error';
+                return;
+            }
+
+            try {
+                status.textContent = 'Capturing normal screenshot...';
+                status.className = 'status';
+
+                const startTime = Date.now();
+
+                const response = await apiClient.post('/adb/screenshot', {
+                    device_id: selectedDevice
+                });
+
+                const elapsed = Date.now() - startTime;
+
+                // Display image
+                normalImage.src = `data:image/png;base64,${response.screenshot}`;
+                normalImage.style.display = 'block';
+
+                // Update info
+                normalInfo.textContent = `Captured in ${elapsed}ms | Elements: ${response.elements?.length || 0}`;
+
+                status.textContent = `✓ Normal screenshot captured in ${elapsed}ms`;
+                status.className = 'status success';
+
+            } catch (error) {
+                console.error('[StitchTest] Normal capture failed:', error);
+                status.textContent = `Normal capture failed: ${error.message}`;
+                status.className = 'status error';
+            }
+        });
+
+        // Capture stitched screenshot
+        document.getElementById('captureStitchedBtn').addEventListener('click', async () => {
+            const status = document.getElementById('testStatus');
+            const stitchedInfo = document.getElementById('stitchedInfo');
+            const stitchedImage = document.getElementById('stitchedImage');
+            const resultInfo = document.getElementById('resultInfo');
+            const metadataDisplay = document.getElementById('metadataDisplay');
+            const debugCard = document.getElementById('debugCard');
+            const debugScreenshots = document.getElementById('debugScreenshots');
+
+            if (!selectedDevice) {
+                status.textContent = 'Please select a device first';
+                status.className = 'status error';
+                return;
+            }
+
+            // Get parameters
+            const maxScrolls = parseInt(document.getElementById('maxScrolls').value) || 5;
+            const scrollRatio = parseFloat(document.getElementById('scrollRatio').value) || 0.75;
+            const overlapRatio = parseFloat(document.getElementById('overlapRatio').value) || 0.25;
+
+            // Clear previous debug screenshots
+            debugScreenshots.innerHTML = '';
+            debugCard.style.display = 'none';
+
+            try {
+                status.textContent = `Capturing stitched screenshot (max ${maxScrolls} scrolls)...`;
+                status.className = 'status';
+
+                const startTime = Date.now();
+
+                const response = await apiClient.post('/adb/screenshot/stitch', {
+                    device_id: selectedDevice,
+                    max_scrolls: maxScrolls,
+                    scroll_ratio: scrollRatio,
+                    overlap_ratio: overlapRatio
+                });
+
+                const elapsed = Date.now() - startTime;
+
+                // Display stitched image
+                stitchedImage.src = `data:image/png;base64,${response.screenshot}`;
+                stitchedImage.style.display = 'block';
+
+                // Store elements for overlay
+                stitchedElements = response.elements || [];
+
+                // Render overlay after image loads (with small delay for layout)
+                stitchedImage.onload = () => {
+                    console.log('[StitchTest] Image loaded, natural size:', stitchedImage.naturalWidth, 'x', stitchedImage.naturalHeight);
+                    console.log('[StitchTest] Elements to render:', stitchedElements.length);
+                    // Small delay to ensure image is fully laid out before measuring
+                    setTimeout(() => {
+                        renderElementOverlay(stitchedElements, stitchedImage);
+                    }, 100);
+                };
+
+                // Display metadata
+                resultInfo.style.display = 'block';
+                metadataDisplay.textContent = JSON.stringify(response.metadata, null, 2);
+
+                // Update info
+                const meta = response.metadata || {};
+                stitchedInfo.textContent = `Captured in ${elapsed}ms | Strategy: ${meta.strategy || 'unknown'} | Scrolls: ${meta.scroll_count || 0} | Captures: ${meta.capture_count || 0} | Size: ${meta.final_width || '?'}x${meta.final_height || '?'}`;
+
+                // Display debug screenshots
+                if (response.debug_screenshots && response.debug_screenshots.length > 0) {
+                    debugCard.style.display = 'block';
+                    response.debug_screenshots.forEach((dbg, idx) => {
+                        const container = document.createElement('div');
+                        container.style.cssText = 'flex: 0 0 auto; text-align: center; background: var(--preview-background); padding: 10px; border-radius: 8px;';
+
+                        const label = document.createElement('div');
+                        label.style.cssText = 'font-weight: bold; margin-bottom: 5px;';
+                        label.textContent = `Capture ${idx + 1}`;
+
+                        const info = document.createElement('div');
+                        info.style.cssText = 'font-size: 11px; color: var(--text-secondary); margin-bottom: 5px;';
+                        info.textContent = `Elements: ${dbg.element_count} | First new Y: ${dbg.first_new_y}`;
+
+                        const img = document.createElement('img');
+                        img.src = `data:image/png;base64,${dbg.image}`;
+                        img.style.cssText = 'max-width: 200px; max-height: 400px; border: 1px solid var(--border-color); border-radius: 4px;';
+                        img.title = `Capture ${idx + 1} - Elements: ${dbg.element_count}, First new Y: ${dbg.first_new_y}`;
+
+                        container.appendChild(label);
+                        container.appendChild(info);
+                        container.appendChild(img);
+                        debugScreenshots.appendChild(container);
+                    });
+                }
+
+                status.textContent = `✓ Stitched screenshot captured in ${elapsed}ms (${meta.scroll_count || 0} scrolls, ${meta.capture_count || 0} captures, strategy: ${meta.strategy || 'unknown'})`;
+                status.className = 'status success';
+
+                console.log('[StitchTest] Stitching result:', response.metadata);
+
+            } catch (error) {
+                console.error('[StitchTest] Stitched capture failed:', error);
+                status.textContent = `Stitched capture failed: ${error.message}`;
+                status.className = 'status error';
+
+                // Show error details
+                resultInfo.style.display = 'block';
+                metadataDisplay.textContent = `Error: ${error.message}\n\nThis may indicate:\n- Device not responding\n- Screen not scrollable\n- OpenCV template matching failed`;
+            }
+        });
+
+        // Initial load
+        loadDevices();
+    </script>
+</body>
+</html>

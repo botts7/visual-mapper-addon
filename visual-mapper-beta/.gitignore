@@ -1,0 +1,66 @@
+# =============================================================================
+# Visual Mapper Addon - .gitignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (CRITICAL)
+.env
+*.key
+*.pem
+*.keystore
+credentials.json
+secrets.json
+
+# Runtime Data
+backend/data/
+data/
+*.log
+*.sqlite
+*.db
+
+# Device-specific configs (personal data)
+flows_*.json
+nav_*.json
+sensors_*.json
+actions_*.json
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+
+# Temp files
+*.tmp
+*.bak
+*.backup
+nul
+
+# Large dependencies
+ws-scrcpy/

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Android device monitoring and automation for Home Assistant via ADB">
+    <meta name="version" content="0.3.1" data-build="dynamic">
+
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#667eea">
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="apple-touch-icon.svg">
+    <link rel="manifest" href="manifest.webmanifest">
+
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Visual Mapper - Android Device Automation">
+    <meta property="og:description" content="Android device monitoring and automation for Home Assistant via ADB">
+    <meta property="og:image" content="favicon.png">
+
+    <title>Visual Mapper - Home</title>
+
+    <!-- Dynamic CSS loading with cache busting -->
+    <script>
+        // Use session-based cache key (refreshes once per browser session)
+        const cacheKey = sessionStorage.getItem('vmCacheKey') || Date.now();
+        sessionStorage.setItem('vmCacheKey', cacheKey);
+        document.write('<link rel="stylesheet" href="css/styles.css?v=0.3.1">');
+    </script>
+    <noscript>
+        <link rel="stylesheet" href="css/styles.css">
+    </noscript>
+
+    <!-- Apply dark mode immediately to prevent flash -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('visual-mapper-theme');
+            if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark-mode');
+                // Also add to body when it loads
+                document.addEventListener('DOMContentLoaded', () => {
+                    document.body.classList.add('dark-mode');
+                });
+            }
+        })();
+    </script>
+</head>
+<body>
+    <!-- Navbar injected by js/components/navbar.js -->
+    <nav></nav>
+
+    <!-- Dynamic JS loading with cache busting -->
+    <script>
+        const cacheKey = sessionStorage.getItem('vmCacheKey') || Date.now();
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = 'js/init.js?v=' + cacheKey;
+        document.body.appendChild(script);
+    </script>
+
+    <div class="container">
+        <div class="card text-center">
+            <h1>Visual Mapper</h1>
+            <p>Android Device Monitoring & Automation for Home Assistant</p>
+            <p class="mt-2">
+                <strong>Version:</strong> <span id="appVersion">Loading...</span>
+            </p>
+            <p class="mt-1">
+                <a href="main.html" class="btn">Go to Dashboard</a>
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>Status</h2>
+            <div class="status success">
+                <strong>Ready for Use:</strong> Home Assistant add-on with MQTT discovery, flow automation, and persistent storage.
+            </div>
+            <div class="status info" id="connectionStatus">
+                <strong>Checking backend connection...</strong>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Features</h2>
+            <ul>
+                <li><strong>Wireless ADB:</strong> Connect to Android devices over WiFi (Android 11+ pairing supported)</li>
+                <li><strong>Sensor Creation:</strong> Extract data from any UI element on your Android device</li>
+                <li><strong>Flow Automation:</strong> Schedule sensor updates and navigate through apps automatically</li>
+                <li><strong>MQTT Integration:</strong> Automatic Home Assistant discovery - sensors appear automatically</li>
+                <li><strong>Action Support:</strong> Tap, swipe, input text, and launch apps remotely</li>
+                <li><strong>Stable Device IDs:</strong> Sensors survive IP address changes</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>Quick Start</h2>
+            <ol>
+                <li><a href="devices.html">Add a Device</a> - Connect your Android device via ADB</li>
+                <li><a href="sensors.html">Create Sensors</a> - Capture data from UI elements</li>
+                <li><a href="flows.html">Build Flows</a> - Automate data collection and navigation</li>
+                <li>View in Home Assistant - Sensors auto-discovered via MQTT</li>
+            </ol>
+        </div>
+    </div>
+
+    <script type="module">
+        // Check backend connection and update status + version
+        async function checkBackend() {
+            const statusEl = document.getElementById('connectionStatus');
+            const versionEl = document.getElementById('appVersion');
+
+            try {
+                const response = await fetch(`${window.API_BASE || '/api'}/health`);
+                if (response.ok) {
+                    const data = await response.json();
+                    statusEl.className = 'status success';
+                    statusEl.innerHTML = `<strong>Backend Connected:</strong> ${data.mqtt_connected ? 'MQTT connected' : 'MQTT disconnected'}`;
+
+                    // Update version from API (single source of truth)
+                    if (data.version) {
+                        versionEl.textContent = data.version;
+                        // Update meta tag too
+                        const metaVersion = document.querySelector('meta[name="version"]');
+                        if (metaVersion) {
+                            metaVersion.content = data.version;
+                        }
+                    } else {
+                        versionEl.textContent = 'Unknown';
+                    }
+                } else {
+                    statusEl.className = 'status warning';
+                    statusEl.innerHTML = '<strong>Backend Unavailable:</strong> Check if the server is running';
+                    versionEl.textContent = 'Offline';
+                }
+            } catch (e) {
+                statusEl.className = 'status warning';
+                statusEl.innerHTML = '<strong>Backend Unavailable:</strong> Check if the server is running';
+                versionEl.textContent = 'Offline';
+            }
+        }
+
+        // Check on load
+        checkBackend();
+    </script>
+</body>
+</html>
