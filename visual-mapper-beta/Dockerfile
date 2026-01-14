@@ -11,7 +11,8 @@ RUN apk add --no-cache \
     jq \
     bash \
     libusb \
-    udev
+    udev \
+    lsof
 
 # NOTE: Coral Edge TPU is NOT supported in the HA addon for two reasons:
 # 1. Alpine Linux uses musl libc, but libedgetpu/pycoral require glibc (Debian/Ubuntu)
