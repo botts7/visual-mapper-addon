@@ -15,7 +15,8 @@
 set -e
 
 # Configuration
-MAIN_REPO="${MAIN_REPO:-../Visual Mapper}"
+# Default path assumes visual-mapper-addon and Visual Mapper are sibling directories
+MAIN_REPO="${MAIN_REPO:-../../Visual Mapper}"
 ADDON_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Default to beta if not specified

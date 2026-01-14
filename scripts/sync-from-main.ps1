@@ -134,6 +134,7 @@ Write-Host "══════════════════════�
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Review changes: git diff"
-Write-Host "  2. Commit: git add -A && git commit -m 'chore: Sync $Target from $SourceBranch ($Version)'"
+$CommitMsg = "chore: Sync $Target from $SourceBranch ($Version)"
+Write-Host "  2. Commit: git add -A; git commit -m '$CommitMsg'"
 Write-Host "  3. Push: git push origin master"
 Write-Host ""
