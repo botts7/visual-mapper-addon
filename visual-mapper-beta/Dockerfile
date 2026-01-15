@@ -43,8 +43,8 @@ COPY .build-version /app/
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
-# Expose port (8081 for beta to avoid conflict with stable on 8080)
-EXPOSE 8081
+# Expose port (8082 for beta to avoid conflict with stable on 8080)
+EXPOSE 8082
 
 # Set environment variable to indicate beta build
 ENV VISUAL_MAPPER_BETA=true

@@ -1,5 +1,5 @@
 name: Visual Mapper Beta
-version: 0.4.0-beta.2.12
+version: 0.4.0-beta.2.13
 slug: visual_mapper_beta
 # image: ghcr.io/botts7/visual-mapper-beta-{arch}  # Enable after testing
 description: "BETA: Android device control and sensor creation - Latest features, may be unstable"
@@ -11,14 +11,15 @@ init: false
 startup: application
 host_network: true
 ports:
-  8081/tcp: 8081
+  8082/tcp: 8082
 ports_description:
-  8081/tcp: Web UI (Beta)
+  8082/tcp: Web UI (Beta)
 ingress: false
-webui: http://[HOST]:[PORT:8081]
+webui: http://[HOST]:[PORT:8082]
 panel_icon: mdi:flask
 panel_title: Visual Mapper Beta
 options:
+  server_port: 8082
   mqtt_broker: core-mosquitto
   mqtt_port: 1883
   mqtt_username: ""
@@ -31,6 +32,7 @@ options:
   ml_batch_size: 64
   ml_save_interval: 60
 schema:
+  server_port: port
   mqtt_broker: str
   mqtt_port: port
   mqtt_username: str?
