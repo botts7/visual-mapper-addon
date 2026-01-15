@@ -25,7 +25,7 @@ options:
   mqtt_username: ""
   mqtt_password: ""
   log_level: debug
-  ml_training_mode: disabled
+  ml_training_mode: local
   ml_remote_host: ""
   ml_remote_port: 8099
   ml_use_dqn: false
