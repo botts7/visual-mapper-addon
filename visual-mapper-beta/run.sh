@@ -11,6 +11,10 @@ echo "=========================================="
 
 # Read configuration from Home Assistant options
 if [ -f "$CONFIG_PATH" ]; then
+    echo "=== Config file contents ==="
+    cat $CONFIG_PATH
+    echo ""
+    echo "=============================="
     export SERVER_PORT=$(jq -r '.server_port // 8082' $CONFIG_PATH)
     export MQTT_BROKER=$(jq -r '.mqtt_broker' $CONFIG_PATH)
     export MQTT_PORT=$(jq -r '.mqtt_port' $CONFIG_PATH)
