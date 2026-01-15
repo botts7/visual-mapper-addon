@@ -54,13 +54,22 @@ echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
 echo "ML Training Mode: ${ML_TRAINING_MODE}"
 echo "Server Port: ${PORT}"
 
-# Kill any orphaned Python processes that might be holding the port
-# This can happen if the container was not cleanly stopped
-echo "Checking for orphaned processes on port ${PORT}..."
+# Debug: Show all listening ports
+echo "=== Debug: All listening ports ==="
+ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "  (ss/netstat not available)"
+echo "==================================="
 
-# First, show what's using the port (for debugging)
+# Kill any orphaned Python processes that might be holding the port
+echo "Checking for port ${PORT}..."
+
+# Check with multiple tools
+if command -v ss &> /dev/null; then
+    echo "ss check for port ${PORT}:"
+    ss -tlnp | grep ":${PORT}" || echo "  (none found)"
+fi
+
 if command -v lsof &> /dev/null; then
-    echo "Processes on port ${PORT}:"
+    echo "lsof check for port ${PORT}:"
     lsof -i:${PORT} 2>/dev/null || echo "  (none found)"
 
     # Try to kill any process holding the port
@@ -70,21 +79,10 @@ if command -v lsof &> /dev/null; then
         echo "$PIDS" | xargs -r kill -9 2>/dev/null || true
         sleep 2
     fi
-elif command -v fuser &> /dev/null; then
-    fuser -v ${PORT}/tcp 2>/dev/null || echo "  (none found)"
-    fuser -k ${PORT}/tcp 2>/dev/null || true
-    sleep 2
-else
-    echo "  Warning: Neither lsof nor fuser available"
 fi
 
-# Final check - if port is still in use, wait a bit more
-if command -v lsof &> /dev/null; then
-    if lsof -ti:${PORT} &>/dev/null; then
-        echo "Port ${PORT} still in use, waiting 5 more seconds..."
-        sleep 5
-    fi
-fi
+# Wait a moment for any cleanup
+sleep 1
 
 cd /app
 
