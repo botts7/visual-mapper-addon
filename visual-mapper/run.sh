@@ -5,12 +5,13 @@ CONFIG_PATH=/data/options.json
 
 # Read configuration from Home Assistant options
 if [ -f "$CONFIG_PATH" ]; then
+    export SERVER_PORT=$(jq -r '.server_port // 8080' $CONFIG_PATH)
     export MQTT_BROKER=$(jq -r '.mqtt_broker' $CONFIG_PATH)
     export MQTT_PORT=$(jq -r '.mqtt_port' $CONFIG_PATH)
     export MQTT_USERNAME=$(jq -r '.mqtt_username' $CONFIG_PATH)
     export MQTT_PASSWORD=$(jq -r '.mqtt_password' $CONFIG_PATH)
     export LOG_LEVEL=$(jq -r '.log_level' $CONFIG_PATH)
-    
+
     # ML Training options
     export ML_TRAINING_MODE=$(jq -r '.ml_training_mode // "disabled"' $CONFIG_PATH)
     export ML_REMOTE_HOST=$(jq -r '.ml_remote_host // ""' $CONFIG_PATH)
@@ -18,10 +19,11 @@ if [ -f "$CONFIG_PATH" ]; then
     export ML_USE_DQN=$(jq -r '.ml_use_dqn // false' $CONFIG_PATH)
     export ML_BATCH_SIZE=$(jq -r '.ml_batch_size // 64' $CONFIG_PATH)
     export ML_SAVE_INTERVAL=$(jq -r '.ml_save_interval // 60' $CONFIG_PATH)
-    
+
     echo "Loaded config from $CONFIG_PATH"
 else
     echo "No config file found, using defaults"
+    export SERVER_PORT="8080"
     export MQTT_BROKER="core-mosquitto"
     export MQTT_PORT="1883"
     export LOG_LEVEL="info"
@@ -43,7 +45,8 @@ echo "ML Training Mode: ${ML_TRAINING_MODE}"
 
 # Kill any orphaned Python processes that might be holding the port
 # This can happen if the container was not cleanly stopped
-PORT=${PORT:-8080}
+export PORT=${SERVER_PORT:-8080}
+echo "Server Port: ${PORT}"
 echo "Checking for orphaned processes on port ${PORT}..."
 
 # First, show what's using the port (for debugging)
