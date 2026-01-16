@@ -95,7 +95,7 @@ cd /app
 if [ "$ML_TRAINING_MODE" = "local" ]; then
     echo "Starting ML Training Server in background..."
 
-    ML_ARGS="--broker $MQTT_BROKER --port $MQTT_PORT"
+    ML_ARGS="--broker $MQTT_BROKER --port $MQTT_PORT --data-dir $DATA_DIR"
 
     if [ -n "$MQTT_USERNAME" ] && [ "$MQTT_USERNAME" != "null" ]; then
         ML_ARGS="$ML_ARGS --username $MQTT_USERNAME"
