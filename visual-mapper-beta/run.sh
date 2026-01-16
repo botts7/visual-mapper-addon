@@ -15,8 +15,8 @@ if [ -f "$CONFIG_PATH" ]; then
     cat $CONFIG_PATH
     echo ""
     echo "=============================="
-    # Port is fixed at 8082 internally - users can map to different external port via HA Network settings
-    export SERVER_PORT=8082
+    # Port is fixed at 8085 internally - users can map to different external port via HA Network settings
+    export SERVER_PORT=8085
     export MQTT_BROKER=$(jq -r '.mqtt_broker' $CONFIG_PATH)
     export MQTT_PORT=$(jq -r '.mqtt_port' $CONFIG_PATH)
     export MQTT_USERNAME=$(jq -r '.mqtt_username' $CONFIG_PATH)
@@ -34,7 +34,7 @@ if [ -f "$CONFIG_PATH" ]; then
     echo "Loaded config from $CONFIG_PATH"
 else
     echo "No config file found, using defaults"
-    export SERVER_PORT="8082"
+    export SERVER_PORT="8085"
     export MQTT_BROKER="core-mosquitto"
     export MQTT_PORT="1883"
     export LOG_LEVEL="debug"  # Default to debug for beta
@@ -50,9 +50,9 @@ mkdir -p "$DATA_DIR/sensors"
 mkdir -p "$DATA_DIR/ml"
 echo "Using beta data directory: $DATA_DIR"
 
-# Use configurable port for beta (default 8082 to avoid conflict with stable on 8080)
+# Use configurable port for beta (default 8085 to avoid conflict with stable on 8080)
 # main.py reads PORT environment variable
-export PORT=${SERVER_PORT:-8082}
+export PORT=${SERVER_PORT:-8085}
 
 echo "Starting Visual Mapper BETA..."
 echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
