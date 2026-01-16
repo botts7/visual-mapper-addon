@@ -15,8 +15,8 @@ if [ -f "$CONFIG_PATH" ]; then
     cat $CONFIG_PATH
     echo ""
     echo "=============================="
-    # Port is fixed at 8085 internally - users can map to different external port via HA Network settings
-    export SERVER_PORT=8085
+    # Port is fixed at 18085 internally - users can map to different external port via HA Network settings
+    export SERVER_PORT=18085
     export MQTT_BROKER=$(jq -r '.mqtt_broker' $CONFIG_PATH)
     export MQTT_PORT=$(jq -r '.mqtt_port' $CONFIG_PATH)
     export MQTT_USERNAME=$(jq -r '.mqtt_username' $CONFIG_PATH)
@@ -34,7 +34,7 @@ if [ -f "$CONFIG_PATH" ]; then
     echo "Loaded config from $CONFIG_PATH"
 else
     echo "No config file found, using defaults"
-    export SERVER_PORT="8085"
+    export SERVER_PORT="18085"
     export MQTT_BROKER="core-mosquitto"
     export MQTT_PORT="1883"
     export LOG_LEVEL="debug"  # Default to debug for beta
@@ -50,9 +50,9 @@ mkdir -p "$DATA_DIR/sensors"
 mkdir -p "$DATA_DIR/ml"
 echo "Using data directory: $DATA_DIR (deleted on uninstall with 'delete data' option)"
 
-# Use configurable port for beta (default 8085 to avoid conflict with stable on 8080)
+# Use configurable port for beta (default 18085 to avoid conflict with stable on 8080)
 # main.py reads PORT environment variable
-export PORT=${SERVER_PORT:-8085}
+export PORT=${SERVER_PORT:-18085}
 
 echo "Starting Visual Mapper BETA..."
 echo "MQTT Broker: ${MQTT_BROKER}:${MQTT_PORT}"
@@ -67,27 +67,35 @@ echo "==================================="
 # Kill any orphaned Python processes that might be holding the port
 echo "Checking for port ${PORT}..."
 
-# Check with multiple tools
-if command -v ss &> /dev/null; then
-    echo "ss check for port ${PORT}:"
-    ss -tlnp | grep ":${PORT}" || echo "  (none found)"
+# Kill any existing python processes (from previous run)
+pkill -9 -f "python3 main.py" 2>/dev/null || true
+pkill -9 -f "ml_training_server.py" 2>/dev/null || true
+
+# Try multiple methods to free the port
+if command -v fuser &> /dev/null; then
+    echo "Killing processes on port ${PORT} with fuser..."
+    fuser -k ${PORT}/tcp 2>/dev/null || true
 fi
 
 if command -v lsof &> /dev/null; then
-    echo "lsof check for port ${PORT}:"
-    lsof -i:${PORT} 2>/dev/null || echo "  (none found)"
-
-    # Try to kill any process holding the port
     PIDS=$(lsof -ti:${PORT} 2>/dev/null || true)
     if [ -n "$PIDS" ]; then
-        echo "Killing PIDs: $PIDS"
+        echo "Killing PIDs on port ${PORT}: $PIDS"
         echo "$PIDS" | xargs -r kill -9 2>/dev/null || true
-        sleep 2
     fi
 fi
 
-# Wait a moment for any cleanup
-sleep 1
+# Wait for port to be released (TIME_WAIT can take a few seconds)
+echo "Waiting for port ${PORT} to be released..."
+for i in 1 2 3 4 5; do
+    if ! ss -tlnp 2>/dev/null | grep -q ":${PORT} " && \
+       ! netstat -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+        echo "Port ${PORT} is free"
+        break
+    fi
+    echo "  Port still in use, waiting... ($i/5)"
+    sleep 2
+done
 
 cd /app
 

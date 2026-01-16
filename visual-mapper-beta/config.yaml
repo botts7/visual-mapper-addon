@@ -11,11 +11,11 @@ init: false
 startup: application
 host_network: true
 ports:
-  8085/tcp: 8085
+  18085/tcp: 18085
 ports_description:
-  8085/tcp: Web UI (Beta)
+  18085/tcp: Web UI (Beta)
 ingress: false
-webui: http://[HOST]:[PORT:8085]
+webui: http://[HOST]:[PORT:18085]
 panel_icon: mdi:flask
 panel_title: Visual Mapper Beta
 options:
