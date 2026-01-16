@@ -41,14 +41,14 @@ else
     export ML_TRAINING_MODE="disabled"
 fi
 
-# IMPORTANT: Use separate data directory for beta to avoid conflicts with stable
-# This allows running both stable and beta simultaneously
-export DATA_DIR="/config/visual_mapper_beta"
+# Use /data for addon storage - this gets deleted when addon is uninstalled
+# with "permanently delete data" option checked
+export DATA_DIR="/data"
 mkdir -p "$DATA_DIR"
 mkdir -p "$DATA_DIR/flows"
 mkdir -p "$DATA_DIR/sensors"
 mkdir -p "$DATA_DIR/ml"
-echo "Using beta data directory: $DATA_DIR"
+echo "Using data directory: $DATA_DIR (deleted on uninstall with 'delete data' option)"
 
 # Use configurable port for beta (default 8085 to avoid conflict with stable on 8080)
 # main.py reads PORT environment variable
