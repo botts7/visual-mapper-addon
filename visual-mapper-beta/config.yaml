@@ -14,14 +14,11 @@ ports:
   8082/tcp: 8082
 ports_description:
   8082/tcp: Web UI (Beta)
-ingress: true
-ingress_port: 8082
-ingress_stream: true
+ingress: false
 webui: http://[HOST]:[PORT:8082]
 panel_icon: mdi:flask
 panel_title: Visual Mapper Beta
 options:
-  server_port: 8082
   mqtt_broker: core-mosquitto
   mqtt_port: 1883
   mqtt_username: ""
@@ -34,7 +31,6 @@ options:
   ml_batch_size: 64
   ml_save_interval: 60
 schema:
-  server_port: port
   mqtt_broker: str
   mqtt_port: port
   mqtt_username: str?

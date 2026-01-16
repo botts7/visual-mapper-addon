@@ -15,7 +15,8 @@ if [ -f "$CONFIG_PATH" ]; then
     cat $CONFIG_PATH
     echo ""
     echo "=============================="
-    export SERVER_PORT=$(jq -r '.server_port // 8082' $CONFIG_PATH)
+    # Port is fixed at 8082 internally - users can map to different external port via HA Network settings
+    export SERVER_PORT=8082
     export MQTT_BROKER=$(jq -r '.mqtt_broker' $CONFIG_PATH)
     export MQTT_PORT=$(jq -r '.mqtt_port' $CONFIG_PATH)
     export MQTT_USERNAME=$(jq -r '.mqtt_username' $CONFIG_PATH)
