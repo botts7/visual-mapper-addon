@@ -29,7 +29,7 @@ COPY requirements.txt /tmp/requirements-addon.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-addon.txt
 
 # Cache buster - change this value to force rebuild of all subsequent layers
-ARG CACHE_BUST=20260118053419
+ARG CACHE_BUST=20260118053928
 RUN echo "Cache bust: $CACHE_BUST (BETA)"
 
 # Copy application files directly (no more git clone - files are embedded in addon repo)
