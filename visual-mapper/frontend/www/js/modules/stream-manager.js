@@ -16,13 +16,13 @@
  * - Connection status updates
  */
 
-import { showToast } from './toast.js?v=0.3.4';
-import LiveStream from './live-stream.js?v=0.3.4';
+import { showToast } from './toast.js?v=0.4.0-beta.3.59';
+import LiveStream from './live-stream.js?v=0.4.0-beta.3.59';
 import {
     ensureDeviceUnlocked as sharedEnsureUnlocked,
     startKeepAwake as sharedStartKeepAwake,
     stopKeepAwake as sharedStopKeepAwake
-} from './device-unlock.js?v=0.3.4';
+} from './device-unlock.js?v=0.4.0-beta.3.59';
 
 // Helper to get API base (from global set by init.js)
 function getApiBase() {
@@ -139,14 +139,18 @@ export async function prepareDeviceForStreaming(wizard) {
 
                 // Fetch screenshot to preload (don't wait too long)
                 try {
-                    const screenshotPromise = fetch(`${apiBase}/adb/screenshot`, {
+                    const abortController = new AbortController();
+                    const timeoutId = setTimeout(() => abortController.abort(), 3000);
+
+                    const response = await fetch(`${apiBase}/adb/screenshot`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ device_id: wizard.selectedDevice, quick: false })
+                        body: JSON.stringify({ device_id: wizard.selectedDevice, quick: false }),
+                        signal: abortController.signal
                     });
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject('timeout'), 3000));
 
-                    const response = await Promise.race([screenshotPromise, timeoutPromise]);
+                    clearTimeout(timeoutId);
+
                     if (response && response.ok) {
                         const data = await response.json();
                         if (data.screenshot) {
@@ -157,7 +161,11 @@ export async function prepareDeviceForStreaming(wizard) {
                         }
                     }
                 } catch (e) {
-                    console.log('[StreamManager] Screenshot preload skipped:', e);
+                    if (e.name === 'AbortError') {
+                        console.log('[StreamManager] Screenshot preload timed out');
+                    } else {
+                        console.log('[StreamManager] Screenshot preload skipped:', e);
+                    }
                 }
 
                 updateStep('step-connect', 'done');
@@ -380,7 +388,8 @@ export async function startStreaming(wizard, drawElementOverlays) {
         }
     };
 
-    // Apply current overlay settings
+    // Apply current overlay settings (including display mode from persistent user preferences)
+    wizard.liveStream.setDisplayMode(wizard.overlayFilters.displayMode || 'all');
     wizard.liveStream.setOverlaysVisible(wizard.overlayFilters.showClickable || wizard.overlayFilters.showNonClickable);
     wizard.liveStream.setShowClickable(wizard.overlayFilters.showClickable);
     wizard.liveStream.setShowNonClickable(wizard.overlayFilters.showNonClickable);
@@ -491,6 +500,10 @@ export function startElementAutoRefresh(wizard) {
         };
     }
 
+    // Track when elements were last refreshed (for static screen optimization)
+    wizard._lastElementRefreshTime = 0;
+    wizard._lastScreenChangeTime = 0;
+
     // Start refresh with configured interval
     wizard.elementRefreshIntervalTimer = setInterval(() => {
         if (wizard.captureMode === 'streaming' && wizard.liveStream?.connectionState === 'connected') {
@@ -499,11 +512,28 @@ export function startElementAutoRefresh(wizard) {
             if (timeSinceFrame < 200) {
                 return;
             }
+
+            // Skip refresh if screen is static and elements already up-to-date
+            // Check if screen has changed since last element refresh
+            const liveStream = wizard.liveStream;
+            if (liveStream && !liveStream._screenChanged && liveStream._stableFrameCount > 5) {
+                // Screen is stable - check if we already have current elements
+                const timeSinceRefresh = performance.now() - (wizard._lastElementRefreshTime || 0);
+                if (timeSinceRefresh < intervalMs * 2) {
+                    // Elements were refreshed recently and screen hasn't changed - skip
+                    if (window.VM_DEBUG) {
+                        console.log('[StreamManager] Skipping refresh - screen static');
+                    }
+                    return;
+                }
+            }
+
             refreshElements(wizard);
+            wizard._lastElementRefreshTime = performance.now();
         }
     }, intervalMs);
 
-    console.log(`[StreamManager] Element auto-refresh started (${intervalMs / 1000}s interval, debounced)`);
+    console.log(`[StreamManager] Element auto-refresh started (${intervalMs / 1000}s interval, debounced, static-skip enabled)`);
 }
 
 /**
@@ -670,10 +700,11 @@ export async function refreshElements(wizard, clearAllElementsAndHover) {
                     wizard.clearAllElementsAndHover();
                 }
 
-                // Force immediate redraw without old overlays
-                if (wizard.liveStream?.currentImage) {
-                    wizard.liveStream.ctx.clearRect(0, 0, wizard.liveStream.canvas.width, wizard.liveStream.canvas.height);
-                    wizard.liveStream.ctx.drawImage(wizard.liveStream.currentImage, 0, 0);
+                // Clear elements from liveStream - next frame will draw without old overlays
+                // CRITICAL: Do NOT manually redraw here with currentImage as it may be stale
+                // The WebSocket handler will naturally draw the next frame without overlays
+                if (wizard.liveStream) {
+                    wizard.liveStream.elements = [];
                 }
             }
 
@@ -730,11 +761,15 @@ export async function refreshElements(wizard, clearAllElementsAndHover) {
         }
 
         // Update LiveStream elements for overlay
+        // Only update elements - next WebSocket frame will redraw with new elements
+        // CRITICAL: Do NOT call _renderFrame manually here!
+        // Calling _renderFrame(currentImage) draws the LAST processed frame which may be stale.
+        // The WebSocket handler will naturally redraw the current live frame with new elements.
         if (wizard.liveStream) {
             wizard.liveStream.elements = elements;
-
-            if (wizard.liveStream.currentImage) {
-                wizard.liveStream._renderFrame(wizard.liveStream.currentImage, elements);
+            // Mark elements as fresh so they'll be drawn on the next frame
+            if (wizard.liveStream.markElementsFresh) {
+                wizard.liveStream.markElementsFresh();
             }
         }
 

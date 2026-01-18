@@ -5,8 +5,7 @@ name: Visual Mapper
 version: 0.2.0
 slug: visual_mapper
 description: Android device control and sensor creation for Home Assistant via ADB
-url: https://github.com/yourusername/visual-mapper
-codenotary: notary@home-assistant.io
+url: https://github.com/botts7/visual-mapper
 
 # Supported architectures
 arch:
@@ -20,7 +19,6 @@ arch:
 init: false
 startup: application
 boot: auto
-watchdog: true
 
 # Host network access required for ADB connections
 host_network: true
@@ -37,8 +35,7 @@ webui: http://[HOST]:[PORT:8080]
 panel_icon: mdi:android
 panel_title: Visual Mapper
 panel_admin: false
-ingress: true
-ingress_port: 8080
+ingress: false
 
 # Add-on options
 options:
@@ -46,10 +43,6 @@ options:
   adb_device_port: 5555
   mqtt_broker: "core-mosquitto"
   mqtt_port: 1883
-  mqtt_security:
-    use_ssl: true
-    tls_insecure: true
-    ca_cert: ""
   mqtt_username: ""
   mqtt_password: ""
   mqtt_discovery_prefix: "homeassistant"
@@ -64,6 +57,7 @@ options:
   ml_use_dqn: false
   ml_batch_size: 64
   ml_save_interval: 60
+  labs_flow_consolidation: false
 
 # Options schema
 schema:
@@ -71,11 +65,6 @@ schema:
   adb_device_port: port
   mqtt_broker: str
   mqtt_port: port
-  mqtt_security:
-    schema:
-      use_ssl: bool
-      tls_insecure: bool
-      ca_cert: str?
   mqtt_username: str?
   mqtt_password: password?
   mqtt_discovery_prefix: str
@@ -90,13 +79,14 @@ schema:
   ml_use_dqn: bool
   ml_batch_size: int(16,256)
   ml_save_interval: int(10,300)
+  labs_flow_consolidation: bool?
 
-# Service dependencies
+# Service dependencies (want = optional, need = required)
 services:
-  - mqtt:need
+  - mqtt:want
 
-# Container image
-image: ghcr.io/yourusername/visual-mapper-{arch}
+# Container image - commented out to build locally
+# image: ghcr.io/botts7/visual-mapper-{arch}
 
 # Map directories
 map:
@@ -115,5 +105,5 @@ apparmor: false
 translations:
   en: translations/en.yaml
 
-# Backup configuration
-backup: simple
+# Backup configuration (hot = backup while running, cold = stop before backup)
+backup: cold

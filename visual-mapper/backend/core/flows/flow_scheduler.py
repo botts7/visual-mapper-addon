@@ -11,6 +11,9 @@ from datetime import datetime
 from dataclasses import dataclass
 
 from .flow_models import SensorCollectionFlow
+from .flow_consolidation import FlowConsolidator, ConsolidationGroup
+from services.device_identity import get_device_identity_resolver
+from services.feature_manager import get_feature_manager
 
 logger = logging.getLogger(__name__)
 
@@ -467,7 +470,42 @@ class FlowScheduler:
         self._running = False
         self._paused = False  # Pause state for periodic scheduling
 
+        # Activity log for UI visibility (circular buffer, max 100 entries)
+        from collections import deque
+        self._activity_log: deque = deque(maxlen=100)
+
+        # Flow consolidation (Labs feature)
+        fm = get_feature_manager()
+        self._consolidation_enabled = fm.is_lab_enabled("flow_consolidation")
+        self._consolidator = FlowConsolidator(
+            config=fm.get_lab_config("flow_consolidation")
+        )
+
+        if self._consolidation_enabled:
+            logger.info("[FlowScheduler] Labs: Flow consolidation ENABLED")
+        else:
+            logger.debug("[FlowScheduler] Labs: Flow consolidation disabled")
+
         logger.info("[FlowScheduler] Initialized")
+
+    def _log_activity(self, event_type: str, flow_id: str = None, device_id: str = None,
+                      message: str = None, success: bool = None, details: dict = None):
+        """Log scheduler activity for UI visibility"""
+        from datetime import datetime
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "event_type": event_type,  # queued, executing, completed, failed, unlock_attempt, unlock_failed, skipped
+            "flow_id": flow_id,
+            "device_id": device_id,
+            "message": message,
+            "success": success,
+            "details": details or {}
+        }
+        self._activity_log.append(entry)
+
+    def get_activity_log(self, limit: int = 50) -> list:
+        """Get recent scheduler activity for UI display"""
+        return list(self._activity_log)[-limit:]
 
     def set_mqtt_manager(self, mqtt_manager):
         """
@@ -479,6 +517,44 @@ class FlowScheduler:
         self.mqtt_manager = mqtt_manager
         self.execution_router.set_mqtt_manager(mqtt_manager)
         logger.info("[FlowScheduler] MQTT manager configured for execution routing")
+
+    def resolve_device_id(self, flow: SensorCollectionFlow) -> Optional[str]:
+        """
+        Resolve a flow's device_id to the currently connected device.
+
+        Uses device_identity resolver to find the current connection_id,
+        which may have changed if the device reconnected with a different port.
+
+        Args:
+            flow: Flow to resolve device for
+
+        Returns:
+            Current connection_id if device is connected, None if not found
+        """
+        try:
+            resolver = get_device_identity_resolver()
+
+            # Try to resolve using stable_device_id if available
+            device_id_to_resolve = flow.stable_device_id or flow.device_id
+
+            # Use centralized resolution
+            current_conn = resolver.resolve_to_connection_id(device_id_to_resolve)
+
+            if current_conn and current_conn != flow.device_id:
+                logger.info(
+                    f"[FlowScheduler] Resolved device {device_id_to_resolve}: "
+                    f"{flow.device_id} -> {current_conn}"
+                )
+                return current_conn
+            elif current_conn:
+                return current_conn
+
+            # Fall back to original device_id
+            return flow.device_id
+
+        except Exception as e:
+            logger.warning(f"[FlowScheduler] Error resolving device ID: {e}")
+            return flow.device_id
 
     async def start(self):
         """Start the scheduler"""
@@ -562,12 +638,28 @@ class FlowScheduler:
             logger.info(
                 f"[FlowScheduler] Skipping {flow_id} - already queued (queue_depth={self._queue_depths.get(device_id, 0)})"
             )
+            self._log_activity("skipped", flow_id, device_id,
+                               f"Already queued (depth={self._queue_depths.get(device_id, 0)})")
             return
 
         # Create queued flow item
         queued = QueuedFlow(
             priority=priority, timestamp=time.time(), flow=flow, reason=reason
         )
+
+        # ============================================
+        # FLOW CONSOLIDATION (Beta)
+        # Check if this flow can be consolidated with pending flows
+        # Skip consolidation for on-demand flows (priority < 5)
+        # ============================================
+        if self._consolidation_enabled and reason == "periodic" and priority >= 5:
+            should_consolidate, group = self._try_consolidation(device_id, queued)
+            if should_consolidate and group:
+                # Execute consolidated group immediately
+                asyncio.create_task(
+                    self._execute_consolidated_group(device_id, group)
+                )
+                return
 
         # Track that this flow is now queued
         self._queued_flow_ids[device_id].add(flow_id)
@@ -581,6 +673,9 @@ class FlowScheduler:
         logger.debug(
             f"[FlowScheduler] Queued flow {flow_id} (priority={priority}, reason={reason}, queue_depth={self._queue_depths[device_id]})"
         )
+        self._log_activity("queued", flow_id, device_id,
+                           f"Priority {priority}, reason: {reason}",
+                           details={"queue_depth": self._queue_depths[device_id], "reason": reason})
 
         # Start scheduler task if not running
         if (
@@ -673,22 +768,38 @@ class FlowScheduler:
                 except ImportError:
                     pass
 
-                # 3. Acquire device lock (only needed for server/ADB execution)
+                # 3. Resolve device ID (handle port changes when device reconnects)
+                resolved_device_id = self.resolve_device_id(queued.flow)
+                if resolved_device_id and resolved_device_id != device_id:
+                    # Update flow's device_id in memory for this execution
+                    queued.flow.device_id = resolved_device_id
+                    logger.info(
+                        f"[FlowScheduler] Updated flow {queued.flow.flow_id} device: {device_id} -> {resolved_device_id}"
+                    )
+
+                # 4. Acquire device lock (only needed for server/ADB execution)
                 async with lock:
                     logger.info(
                         f"[FlowScheduler] Executing flow {queued.flow.flow_id} (priority={queued.priority}, reason={queued.reason}, method={getattr(queued.flow, 'execution_method', 'server')})"
                     )
 
                     try:
+                        # Use resolved device_id for unlock check
+                        exec_device_id = queued.flow.device_id
+
                         # ============================================
                         # AUTO-UNLOCK: Before flow execution
                         # ============================================
-                        unlocked = await self._auto_unlock_if_needed(device_id)
+                        self._log_activity("executing", queued.flow.flow_id, exec_device_id,
+                                           f"Starting execution ({queued.flow.name})")
+                        unlocked = await self._auto_unlock_if_needed(exec_device_id)
                         if not unlocked:
                             # Re-queue instead of skipping - device may unlock soon
                             logger.warning(
                                 f"[FlowScheduler] Flow {queued.flow.flow_id} deferred - device locked, re-queuing in 10s"
                             )
+                            self._log_activity("deferred", queued.flow.flow_id, exec_device_id,
+                                               "Device locked, re-queuing in 10s", success=False)
                             queue.task_done()
 
                             # Re-queue with slight delay (don't block the queue)
@@ -728,6 +839,10 @@ class FlowScheduler:
                             logger.debug(
                                 f"[FlowScheduler] Flow {queued.flow.flow_id} completed successfully via {method}{fallback_msg}"
                             )
+                            self._log_activity("completed", queued.flow.flow_id, device_id,
+                                               f"Completed successfully via {method}{fallback_msg}",
+                                               success=True,
+                                               details={"steps": result.executed_steps, "method": method})
 
                             # ============================================
                             # AUTO-LOCK: After successful flow execution
@@ -745,6 +860,11 @@ class FlowScheduler:
                                         f"[FlowScheduler] Failed to lock device: {lock_error}"
                                     )
                         else:
+                            error_msg = result.error_message or "Unknown error"
+                            self._log_activity("failed", queued.flow.flow_id, device_id,
+                                               f"Failed: {error_msg[:100]}",
+                                               success=False,
+                                               details={"error": error_msg, "failed_step": result.failed_step})
                             logger.warning(
                                 f"[FlowScheduler] Flow {queued.flow.flow_id} failed: {result.error_message}"
                             )
@@ -1135,144 +1255,43 @@ class FlowScheduler:
         """
         Ensure device is unlocked before flow execution.
 
-        Enhanced with retry logic:
-        - 3 unlock attempts with progressive delays
-        - Tries swipe-to-unlock first (now with Samsung-specific handling)
-        - Uses PIN/passcode if AUTO_UNLOCK strategy is configured
+        Scheduler-specific wrapper that adds debounce protection before
+        delegating to FlowExecutor's unified unlock method.
 
         Returns True if device is ready (unlocked or successfully unlocked).
         Returns False if device is locked and couldn't be unlocked.
         """
-        from utils.device_security import LockStrategy
         import time
 
-        MAX_UNLOCK_ATTEMPTS = 3
-
-        # Pre-flight checks (do once, not in retry loop)
-
-        # Check debounce - prevent rapid unlock attempts
+        # Scheduler-specific debounce check - prevent rapid unlock attempts
+        # when multiple flows are scheduled close together
         last_attempt = self._last_unlock_attempt.get(device_id, 0)
         time_since_last = time.time() - last_attempt
         if time_since_last < self._unlock_debounce_seconds:
             remaining = int(self._unlock_debounce_seconds - time_since_last)
-            logger.debug(
-                f"[FlowScheduler] Unlock debounce active for {device_id} ({remaining}s remaining)"
+            logger.warning(
+                f"[FlowScheduler] Unlock debounce blocking {device_id} ({remaining}s remaining) - skipping unlock"
             )
+            self._log_activity("unlock_debounced", None, device_id,
+                               f"Debounce active ({remaining}s remaining)", success=False)
             return False
 
-        # Check unlock cooldown (prevents device lockout)
-        unlock_status = self.flow_executor.adb_bridge.get_unlock_status(device_id)
-        if unlock_status.get("in_cooldown"):
-            cooldown_remaining = unlock_status.get("cooldown_remaining_seconds", 0)
-            logger.error(
-                f"[FlowScheduler] Unlock in cooldown ({cooldown_remaining}s remaining)"
-            )
-            return False
+        # Record unlock attempt time for debounce
+        self._last_unlock_attempt[device_id] = time.time()
 
-        # Get security config (try both device_id and stable_device_id)
-        security_config = self.flow_executor.security_manager.get_lock_config(device_id)
-        if not security_config:
-            try:
-                stable_id = await self.flow_executor.adb_bridge.get_stable_device_id(
-                    device_id
-                )
-                if stable_id and stable_id != device_id:
-                    security_config = (
-                        self.flow_executor.security_manager.get_lock_config(stable_id)
-                    )
-            except:
-                pass
-
-        has_auto_unlock = (
-            security_config
-            and security_config.get("strategy") == LockStrategy.AUTO_UNLOCK.value
-        )
-
-        # Get passcode if available
-        passcode = None
-        if has_auto_unlock:
-            passcode = self.flow_executor.security_manager.get_passcode(device_id)
-            if not passcode:
-                try:
-                    stable_id = (
-                        await self.flow_executor.adb_bridge.get_stable_device_id(
-                            device_id
-                        )
-                    )
-                    if stable_id and stable_id != device_id:
-                        passcode = self.flow_executor.security_manager.get_passcode(
-                            stable_id
-                        )
-                except:
-                    pass
-
-        # Retry loop with progressive delays
-        for attempt in range(MAX_UNLOCK_ATTEMPTS):
-            # Check if device is locked
-            is_locked = await self.flow_executor.adb_bridge.is_locked(device_id)
-            if not is_locked:
-                if attempt > 0:
-                    logger.info(
-                        f"[FlowScheduler] Device {device_id} unlocked after {attempt} attempts"
-                    )
-                else:
-                    logger.debug(f"[FlowScheduler] Device {device_id} already unlocked")
-                return True
-
-            logger.info(
-                f"[FlowScheduler] Device {device_id} is locked - unlock attempt {attempt + 1}/{MAX_UNLOCK_ATTEMPTS}"
-            )
-
-            # Record unlock attempt time for debounce
-            self._last_unlock_attempt[device_id] = time.time()
-
-            # Step 1: Try swipe unlock (Samsung devices now use unlock_screen_samsung with retry)
-            try:
-                logger.info(f"[FlowScheduler] Calling unlock_screen for {device_id}")
-                unlock_success = await self.flow_executor.adb_bridge.unlock_screen(
-                    device_id
-                )
-                await asyncio.sleep(0.8)  # Let screen stabilize
-
-                if (
-                    unlock_success
-                    and not await self.flow_executor.adb_bridge.is_locked(device_id)
-                ):
-                    logger.info(f"[FlowScheduler] Device unlocked via swipe")
-                    return True
-            except Exception as e:
-                logger.warning(f"[FlowScheduler] Swipe unlock failed: {e}")
-
-            # Step 2: Try PIN/passcode if configured
-            if passcode:
-                logger.info(f"[FlowScheduler] Attempting PIN unlock for {device_id}")
-                try:
-                    if await self.flow_executor.adb_bridge.unlock_device(
-                        device_id, passcode
-                    ):
-                        logger.info(f"[FlowScheduler] Device unlocked with passcode")
-                        return True
-                    else:
-                        logger.warning(f"[FlowScheduler] PIN unlock returned False")
-                except Exception as e:
-                    logger.error(f"[FlowScheduler] Passcode unlock error: {e}")
-
-            # Check if we unlocked after PIN attempt
-            if not await self.flow_executor.adb_bridge.is_locked(device_id):
-                logger.info(f"[FlowScheduler] Device {device_id} unlocked")
-                return True
-
-            # Wait before retry (progressive delay: 2s, 3s, 4s)
-            if attempt < MAX_UNLOCK_ATTEMPTS - 1:
-                wait_time = 2.0 + attempt
-                logger.info(f"[FlowScheduler] Waiting {wait_time}s before retry...")
-                await asyncio.sleep(wait_time)
-
-        # All retries exhausted
-        logger.error(
-            f"[FlowScheduler] Failed to unlock device {device_id} after {MAX_UNLOCK_ATTEMPTS} attempts"
-        )
-        return False
+        # Delegate to unified unlock method in FlowExecutor
+        # (has retry logic, cooldown check, swipe + PIN support)
+        # FlowExecutor returns dict with "success" key - extract it for bool return
+        self._log_activity("unlock_attempt", None, device_id, "Attempting device unlock")
+        result = await self.flow_executor.auto_unlock_if_needed(device_id)
+        success = result.get("success", False)
+        if success:
+            self._log_activity("unlock_success", None, device_id, "Device unlocked", success=True)
+        else:
+            error_msg = result.get("error", "Unknown unlock error")
+            self._log_activity("unlock_failed", None, device_id, error_msg, success=False,
+                               details={"reason": result.get("reason", "unknown")})
+        return success
 
     def get_time_until_next_flow(self, device_id: str) -> Optional[float]:
         """
@@ -1423,3 +1442,184 @@ class FlowScheduler:
             f"[FlowScheduler] Next flow in {time_until_next:.0f}s (> {grace_period_seconds}s grace) - will lock"
         )
         return True
+
+    # ============================================================================
+    # Flow Consolidation (Beta Feature)
+    # ============================================================================
+
+    def _try_consolidation(
+        self, device_id: str, queued: "QueuedFlow"
+    ) -> Tuple[bool, Optional[ConsolidationGroup]]:
+        """
+        Try to consolidate a new flow with pending flows
+
+        Args:
+            device_id: Device ID
+            queued: New QueuedFlow being scheduled
+
+        Returns:
+            Tuple of (should_consolidate, ConsolidationGroup or None)
+        """
+        # Add to pending consolidation queue
+        self._consolidator.add_pending_flow(device_id, queued)
+
+        # Check if we have enough flows for consolidation
+        pending = self._consolidator.get_pending_flows(device_id)
+        if len(pending) < 2:
+            return False, None
+
+        # Find consolidation opportunities
+        flows = [qf.flow for qf in pending]
+        groups = self._consolidator.find_consolidation_opportunities(flows)
+
+        if not groups:
+            return False, None
+
+        # Check if savings meet threshold
+        config = self._consolidator.config
+        min_savings = config.get("minimum_savings_threshold", 5)
+
+        for group in groups:
+            if group.estimated_savings_seconds >= min_savings:
+                logger.info(
+                    f"[FlowScheduler] Consolidation triggered: "
+                    f"{len(group.flows)} flows, savings={group.estimated_savings_seconds:.1f}s"
+                )
+                return True, group
+
+        return False, None
+
+    async def _execute_consolidated_group(
+        self, device_id: str, group: ConsolidationGroup
+    ):
+        """
+        Execute a consolidated group of flows
+
+        Args:
+            device_id: Device ID
+            group: ConsolidationGroup to execute
+        """
+        lock = self._device_locks.get(device_id)
+        if not lock:
+            lock = asyncio.Lock()
+            self._device_locks[device_id] = lock
+
+        self._log_activity(
+            "consolidation_started",
+            None,
+            device_id,
+            f"Executing {len(group.flows)} consolidated flows",
+            details={
+                "group_id": group.group_id,
+                "app_package": group.app_package,
+                "flows": [f.flow_id for f in group.flows],
+                "estimated_savings": group.estimated_savings_seconds,
+            },
+        )
+
+        async with lock:
+            try:
+                # Clear pending flows for this device
+                self._consolidator.clear_pending_flows(device_id)
+
+                # Resolve device ID (handle port changes)
+                resolved_device_id = device_id
+                if group.flows:
+                    resolved_device_id = self.resolve_device_id(group.flows[0]) or device_id
+
+                # Auto-unlock before execution
+                unlocked = await self._auto_unlock_if_needed(resolved_device_id)
+                if not unlocked:
+                    logger.warning(
+                        f"[FlowScheduler] Consolidated execution deferred - device locked"
+                    )
+                    self._log_activity(
+                        "consolidation_failed",
+                        None,
+                        device_id,
+                        "Device locked, could not unlock",
+                        success=False,
+                    )
+                    # Re-queue flows individually
+                    for flow in group.flows:
+                        await self.schedule_flow(flow, priority=15, reason="retry_after_consolidation_failed")
+                    return
+
+                # Execute consolidated flows via flow executor
+                result = await self.flow_executor.execute_consolidated_flows(
+                    group, device_lock=lock
+                )
+
+                # Record consolidation stats
+                self._consolidator.record_consolidation(group, result.success)
+
+                # Update metrics for each flow
+                for flow in group.flows:
+                    self._last_execution[flow.device_id] = datetime.now()
+                    self._total_executions[flow.device_id] = (
+                        self._total_executions.get(flow.device_id, 0) + 1
+                    )
+
+                if result.success:
+                    self._log_activity(
+                        "consolidation_completed",
+                        None,
+                        device_id,
+                        f"Consolidated execution completed: {len(group.flows)} flows",
+                        success=True,
+                        details={
+                            "group_id": group.group_id,
+                            "executed_steps": result.executed_steps,
+                            "sensors_captured": len(result.captured_sensors),
+                        },
+                    )
+
+                    # Auto-lock if appropriate
+                    if await self.should_lock_device(device_id):
+                        try:
+                            await self.flow_executor.adb_bridge.sleep_screen(device_id)
+                            logger.info(f"[FlowScheduler] Locked device after consolidation")
+                        except Exception as lock_error:
+                            logger.warning(f"[FlowScheduler] Failed to lock: {lock_error}")
+                else:
+                    self._log_activity(
+                        "consolidation_failed",
+                        None,
+                        device_id,
+                        f"Consolidated execution failed: {result.error_message}",
+                        success=False,
+                        details={"error": result.error_message},
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"[FlowScheduler] Consolidated execution error: {e}", exc_info=True
+                )
+                self._log_activity(
+                    "consolidation_failed",
+                    None,
+                    device_id,
+                    f"Error: {str(e)}",
+                    success=False,
+                )
+
+    def get_consolidation_stats(self) -> Dict:
+        """
+        Get flow consolidation statistics
+
+        Returns:
+            Dictionary with consolidation metrics
+        """
+        return self._consolidator.get_stats()
+
+    def get_pending_consolidations(self, device_id: Optional[str] = None) -> List[Dict]:
+        """
+        Get pending consolidation opportunities
+
+        Args:
+            device_id: Optional device to filter by
+
+        Returns:
+            List of pending consolidation info dicts
+        """
+        return self._consolidator.get_pending_consolidations(device_id)

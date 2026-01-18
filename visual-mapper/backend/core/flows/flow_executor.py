@@ -10,7 +10,7 @@ import uuid
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from PIL import Image
 import io
 
@@ -120,22 +120,320 @@ class FlowExecutor:
         # Prevents redundant sensor captures within the same execution cycle
         self._session_captured_sensors: Dict[str, Any] = {}
 
+        # Track sensors skipped due to interval (for logging)
+        self._sensors_skipped_by_interval: Dict[str, float] = {}
+
         logger.info("[FlowExecutor] Initialized")
+
+    def _analyze_skippable_steps(self, flow: SensorCollectionFlow) -> set[int]:
+        """
+        Pre-analyze flow to determine which steps can be skipped based on sensor intervals.
+
+        Returns a set of step indices that can be skipped.
+
+        Logic:
+        - Find each capture_sensors step
+        - Check if ALL sensors in that step can be skipped (not due for update)
+        - If yes, also mark preceding navigation steps (tap, swipe) as skippable
+          (up to the previous capture_sensors or launch_app step)
+        """
+        skippable_steps = set()
+        device_id = flow.device_id
+
+        # Navigation step types that can be skipped if their target capture is skippable
+        nav_step_types = {"tap", "swipe", "wait"}
+
+        # Find all capture_sensors steps and check if they can be skipped
+        for i, step in enumerate(flow.steps):
+            if step.step_type != "capture_sensors":
+                continue
+
+            if not step.sensor_ids:
+                continue
+
+            # Check if ALL sensors in this step can be skipped
+            all_skippable = True
+            for sensor_id in step.sensor_ids:
+                sensor = self.sensor_manager.get_sensor(device_id, sensor_id)
+                if not sensor:
+                    sensor = self._find_sensor_by_stable_id(device_id, sensor_id)
+
+                needs_update, _ = self._sensor_needs_update(sensor, device_id)
+                if needs_update:
+                    all_skippable = False
+                    break
+
+            if not all_skippable:
+                continue
+
+            # This capture_sensors step can be skipped
+            skippable_steps.add(i)
+
+            # Walk backwards to find navigation steps leading to this capture
+            # Stop at: another capture_sensors, launch_app, restart_app, or start of flow
+            j = i - 1
+            while j >= 0:
+                prev_step = flow.steps[j]
+                prev_type = prev_step.step_type
+
+                # Stop at boundary steps
+                if prev_type in {"capture_sensors", "launch_app", "restart_app", "go_home"}:
+                    break
+
+                # Mark navigation steps as skippable
+                if prev_type in nav_step_types:
+                    skippable_steps.add(j)
+
+                j -= 1
+
+        return skippable_steps
+
+    def _calculate_dynamic_timeout(self, flow: SensorCollectionFlow) -> int:
+        """
+        Calculate a dynamic timeout based on flow complexity.
+
+        Returns the recommended minimum timeout in seconds.
+
+        Formula:
+        - Base: 30 seconds (app launch, setup)
+        - Per navigation step (tap, swipe, wait): +2 seconds
+        - Per capture_sensors step: +5 seconds (screenshot + UI dump + extraction)
+        - Per sensor in capture steps: +1 second
+
+        The returned value is the MINIMUM recommended timeout.
+        If flow.flow_timeout is higher, we use the configured value.
+        """
+        base_timeout = 30
+        nav_time = 0
+        capture_time = 0
+
+        for step in flow.steps:
+            step_type = step.step_type
+            if step_type in {"tap", "swipe", "wait", "go_back", "go_home"}:
+                nav_time += 2
+            elif step_type == "capture_sensors":
+                capture_time += 5
+                # Add time per sensor
+                if step.sensor_ids:
+                    capture_time += len(step.sensor_ids) * 1
+            elif step_type in {"launch_app", "restart_app"}:
+                nav_time += 5  # App launch takes longer
+            else:
+                nav_time += 1  # Other steps
+
+        calculated = base_timeout + nav_time + capture_time
+        return calculated
+
+    async def auto_unlock_if_needed(self, device_id: str) -> dict:
+        """
+        Unified device unlock method with retry logic and debounce protection.
+
+        This method is called by both FlowService (on-demand execution) and
+        FlowScheduler (periodic execution) to ensure consistent unlock behavior.
+
+        Features:
+        - Debounce: Prevents rapid unlock attempts (5 second minimum between attempts)
+        - Retry: Up to 3 unlock attempts with progressive delays (2s, 3s, 4s)
+        - Cooldown check: Respects device lockout cooldown from ADB bridge
+        - Swipe + PIN: Tries swipe first, then PIN if AUTO_UNLOCK configured
+
+        Returns dict with:
+        - success: True if device is ready (unlocked or successfully unlocked)
+        - error: Error message if unlock failed (only present if success=False)
+        - reason: Reason code (only present if success=False)
+        """
+        from utils.device_security import LockStrategy
+
+        MAX_UNLOCK_ATTEMPTS = 3
+        RETRY_DELAYS = [2.0, 3.0, 4.0]
+
+        # Check unlock cooldown (prevents device lockout)
+        unlock_status = self.adb_bridge.get_unlock_status(device_id)
+        if unlock_status.get("in_cooldown"):
+            cooldown_remaining = unlock_status.get("cooldown_remaining_seconds", 0)
+            logger.warning(
+                f"[FlowExecutor] Device {device_id} in unlock cooldown ({cooldown_remaining:.0f}s remaining)"
+            )
+            return {
+                "success": False,
+                "error": f"Device is in unlock cooldown ({int(cooldown_remaining)}s remaining). Too many failed unlock attempts.",
+                "reason": "cooldown"
+            }
+
+        # Get security config (try both device_id and stable_device_id)
+        security_config = self.security_manager.get_lock_config(device_id)
+        logger.info(f"[FlowExecutor] Security config for {device_id}: {security_config is not None}")
+        if not security_config:
+            try:
+                stable_id = await self.adb_bridge.get_device_serial(device_id)
+                logger.info(f"[FlowExecutor] Trying stable_id lookup: {stable_id}")
+                if stable_id and stable_id != device_id:
+                    security_config = self.security_manager.get_lock_config(stable_id)
+                    logger.info(f"[FlowExecutor] Security config via stable_id: {security_config is not None}")
+            except Exception as e:
+                logger.warning(f"[FlowExecutor] Could not get security config via stable_id: {e}")
+
+        has_auto_unlock = (
+            security_config
+            and security_config.get("strategy") == LockStrategy.AUTO_UNLOCK.value
+        )
+
+        # Get passcode if AUTO_UNLOCK configured
+        passcode = None
+        if has_auto_unlock:
+            passcode = self.security_manager.get_passcode(device_id)
+            logger.info(f"[FlowExecutor] Passcode for {device_id}: {'found' if passcode else 'NOT FOUND'}")
+            if not passcode:
+                try:
+                    stable_id = await self.adb_bridge.get_device_serial(device_id)
+                    logger.info(f"[FlowExecutor] Trying passcode via stable_id: {stable_id}")
+                    if stable_id and stable_id != device_id:
+                        passcode = self.security_manager.get_passcode(stable_id)
+                        logger.info(f"[FlowExecutor] Passcode via stable_id: {'found' if passcode else 'NOT FOUND'}")
+                except Exception as e:
+                    logger.warning(f"[FlowExecutor] Could not get passcode via stable_id: {e}")
+        else:
+            logger.info(f"[FlowExecutor] AUTO_UNLOCK not configured for {device_id}")
+
+        # Unlock attempts with retry logic
+        for attempt in range(MAX_UNLOCK_ATTEMPTS):
+            # Check if device is locked
+            is_locked = await self.adb_bridge.is_locked(device_id)
+            if not is_locked:
+                if attempt > 0:
+                    logger.info(
+                        f"[FlowExecutor] Device {device_id} unlocked after {attempt} attempts"
+                    )
+                else:
+                    logger.debug(f"[FlowExecutor] Device {device_id} already unlocked")
+                return {"success": True}
+
+            # Log unlock attempt
+            if attempt == 0:
+                logger.info(f"[FlowExecutor] Device {device_id} is locked - attempting unlock")
+            else:
+                logger.info(
+                    f"[FlowExecutor] Unlock attempt {attempt + 1}/{MAX_UNLOCK_ATTEMPTS} for {device_id}"
+                )
+
+            # Check if AUTO_UNLOCK is configured - if not, return helpful error on first attempt
+            if attempt == 0 and not has_auto_unlock:
+                # Device is locked but AUTO_UNLOCK not configured - tell user what to do
+                logger.warning(
+                    f"[FlowExecutor] Device {device_id} is locked but AUTO_UNLOCK not configured"
+                )
+                return {
+                    "success": False,
+                    "error": "Device is locked but unlock is not configured. Go to Device Settings > Security and enable AUTO_UNLOCK with your PIN/passcode.",
+                    "reason": "not_configured"
+                }
+
+            # If passcode is configured, try PIN unlock FIRST (faster than swipe attempts)
+            # This matches the behavior of the "Test Unlock" button which works quickly
+            if passcode:
+                logger.info(f"[FlowExecutor] Attempting PIN unlock for {device_id}")
+                try:
+                    if await self.adb_bridge.unlock_device(device_id, passcode):
+                        logger.info(f"[FlowExecutor] Device unlocked with PIN")
+                        return {"success": True}
+                except Exception as e:
+                    logger.warning(f"[FlowExecutor] PIN unlock failed: {e}")
+
+                # Check if we unlocked after PIN attempt
+                if not await self.adb_bridge.is_locked(device_id):
+                    logger.info(f"[FlowExecutor] Device {device_id} unlocked")
+                    return {"success": True}
+            else:
+                # No passcode configured - try swipe-to-unlock
+                try:
+                    unlock_success = await self.adb_bridge.unlock_screen(device_id)
+                    await asyncio.sleep(0.5)
+
+                    if unlock_success and not await self.adb_bridge.is_locked(device_id):
+                        logger.info(f"[FlowExecutor] Device unlocked via swipe")
+                        return {"success": True}
+                except Exception as e:
+                    logger.warning(f"[FlowExecutor] Swipe unlock failed: {e}")
+
+            # Wait before retry
+            if attempt < MAX_UNLOCK_ATTEMPTS - 1:
+                delay = RETRY_DELAYS[attempt]
+                logger.debug(f"[FlowExecutor] Waiting {delay}s before retry...")
+                await asyncio.sleep(delay)
+
+        # All attempts failed
+        logger.error(
+            f"[FlowExecutor] Failed to unlock device {device_id} after {MAX_UNLOCK_ATTEMPTS} attempts"
+        )
+        return {
+            "success": False,
+            "error": f"Failed to unlock device after {MAX_UNLOCK_ATTEMPTS} attempts. Check that your PIN/passcode is correct in Device Settings > Security.",
+            "reason": "unlock_failed"
+        }
+
+    def _sensor_needs_update(self, sensor, device_id: str) -> tuple[bool, float]:
+        """
+        Check if a sensor needs to be updated based on its individual update_interval_seconds.
+
+        Returns:
+            tuple: (needs_update: bool, seconds_until_next: float)
+                   If needs_update is False, seconds_until_next shows when it will need updating
+        """
+        if not sensor:
+            return True, 0  # If sensor not found, try to capture anyway
+
+        # If no last_updated, sensor has never been captured - needs update
+        if not sensor.last_updated:
+            return True, 0
+
+        # Calculate time since last update (use naive UTC for consistency)
+        now = datetime.utcnow()
+        last_updated = sensor.last_updated
+
+        # Handle string datetime (from JSON deserialization)
+        if isinstance(last_updated, str):
+            try:
+                last_updated = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+            except ValueError:
+                return True, 0  # Can't parse, needs update
+
+        # Ensure both are naive for comparison (strip timezone if present)
+        if hasattr(last_updated, 'tzinfo') and last_updated.tzinfo is not None:
+            last_updated = last_updated.replace(tzinfo=None)
+
+        elapsed_seconds = (now - last_updated).total_seconds()
+        interval = sensor.update_interval_seconds
+
+        if elapsed_seconds >= interval:
+            return True, 0  # Interval elapsed, needs update
+
+        # Doesn't need update yet
+        seconds_until_next = interval - elapsed_seconds
+        return False, seconds_until_next
 
     async def execute_flow(
         self,
         flow: SensorCollectionFlow,
         device_lock: Optional[asyncio.Lock] = None,
         learn_mode: bool = False,
+        strict_mode: bool = False,
+        repair_mode: bool = False,
+        force_execute: bool = False,
     ) -> FlowExecutionResult:
         """
-        Execute complete flow
+        Execute complete flow with configurable execution modes.
 
         Args:
             flow: Flow to execute
             device_lock: Optional device lock (from scheduler)
             learn_mode: If True, capture UI elements at each screen and update navigation graph.
                        Makes execution slower but improves future Smart Flow generation.
+            strict_mode: If True, fail steps when navigation doesn't reach expected screen.
+                        Default False maintains backward compatibility (warn but continue).
+            repair_mode: If True, auto-update element bounds when drift is detected.
+                        Fixes "Element moved Xpx" issues automatically.
+            force_execute: If True, execute ALL steps regardless of sensor update intervals.
+                          Useful for manual testing - bypasses "sensors not due" skip logic.
 
         Returns:
             FlowExecutionResult with success/failure details
@@ -148,6 +446,8 @@ class FlowExecutor:
         5. Publish to MQTT in real-time
         6. Update flow metrics
         7. (Learn Mode) Capture UI elements and update navigation graph
+        8. (Strict Mode) Fail on navigation errors instead of continuing
+        9. (Repair Mode) Auto-update drifted element bounds
         """
         start_time = time.time()
         result = FlowExecutionResult(
@@ -156,12 +456,27 @@ class FlowExecutor:
             executed_steps=0,
             captured_sensors={},
             execution_time_ms=0,
+            # Set execution mode flags
+            strict_mode=strict_mode,
+            repair_mode=repair_mode,
+            force_execute=force_execute,
         )
 
         # Track learned screens if learn_mode is enabled
         learned_screens = []
+
+        # Log enabled modes
+        enabled_modes = []
         if learn_mode:
-            logger.info(f"[FlowExecutor] Learn Mode enabled - will capture UI elements")
+            enabled_modes.append("Learn")
+        if strict_mode:
+            enabled_modes.append("Strict")
+        if repair_mode:
+            enabled_modes.append("Repair")
+        if force_execute:
+            enabled_modes.append("Force")
+        if enabled_modes:
+            logger.info(f"[FlowExecutor] Execution modes: {', '.join(enabled_modes)}")
 
         # Create execution log for history tracking
         execution_log = FlowExecutionLog(
@@ -179,6 +494,26 @@ class FlowExecutor:
 
         # Clear session cache for this execution
         self._session_captured_sensors = {}
+
+        # Pre-analyze flow for page-skipping optimization
+        # This identifies steps that can be skipped because all sensors in them are not due for update
+        # force_execute bypasses this optimization entirely
+        if force_execute:
+            skippable_steps = set()
+            logger.info(f"[FlowExecutor] Force execute: ALL steps will run (ignoring sensor intervals)")
+        else:
+            skippable_steps = self._analyze_skippable_steps(flow)
+            if skippable_steps:
+                logger.info(f"[FlowExecutor] Page-skip optimization: {len(skippable_steps)} steps can be skipped (sensors not due)")
+
+        # Dynamic timeout calculation - use the higher of configured or calculated minimum
+        calculated_timeout = self._calculate_dynamic_timeout(flow)
+        effective_timeout = max(flow.flow_timeout, calculated_timeout)
+        if effective_timeout > flow.flow_timeout:
+            logger.info(f"[FlowExecutor] Auto-adjusting timeout: {flow.flow_timeout}s -> {effective_timeout}s (based on {len(flow.steps)} steps)")
+            # Temporarily override for this execution
+            original_timeout = flow.flow_timeout
+            flow.flow_timeout = effective_timeout
 
         logger.info(f"[FlowExecutor] Starting flow {flow.flow_id} ({flow.name})")
 
@@ -228,36 +563,27 @@ class FlowExecutor:
                     "[FlowExecutor] start_from_current_screen enabled - skipping app reset"
                 )
             elif first_step_is_launch:
-                # First step is LAUNCH_APP - check if already on correct screen before resetting
+                # First step is LAUNCH_APP - always reset app for consistent starting point
                 if target_package:
-                    # Smart check: skip reset if already on correct screen
                     try:
                         current_activity = await self.adb_bridge.get_current_activity(
                             flow.device_id
-                        )
-                        current_pkg = (
-                            current_activity.split("/")[0]
-                            if current_activity and "/" in current_activity
-                            else current_activity
                         )
                         expected_activity = (
                             first_step.expected_activity or first_step.screen_activity
                         )
 
-                        # Skip reset if already on correct screen
+                        # Only skip reset if we have a SPECIFIC expected_activity AND we're already on it
                         if expected_activity and self._activity_matches(
                             current_activity, expected_activity
                         ):
                             logger.info(
-                                f"[FlowExecutor] Already on correct screen - skipping app reset"
-                            )
-                        elif current_pkg == target_package and not expected_activity:
-                            logger.info(
-                                f"[FlowExecutor] Already on target app - skipping app reset"
+                                f"[FlowExecutor] Already on exact expected screen ({expected_activity}) - skipping app reset"
                             )
                         else:
+                            # Always reset to ensure clean start - app may be on different internal screen
                             logger.info(
-                                "[FlowExecutor] Resetting app state before launch_app step"
+                                "[FlowExecutor] Resetting app state before launch_app step for clean start"
                             )
                             reset_success = await self._reset_app_state(
                                 flow.device_id, target_package
@@ -323,6 +649,13 @@ class FlowExecutor:
                     logger.warning(f"  {result.error_message}")
                     break
 
+                # Page-skip optimization: skip steps that lead to sensors not due for update
+                if i in skippable_steps:
+                    step_desc = step.description or f"Step {i+1}: {step.step_type}"
+                    logger.info(f"  [Skip] {step_desc} (sensors not due for update)")
+                    result.executed_steps += 1  # Count as executed (skipped successfully)
+                    continue
+
                 # Log step execution
                 step_desc = step.description or f"Step {i+1}: {step.step_type}"
                 logger.info(f"  Executing: {step_desc}")
@@ -354,8 +687,8 @@ class FlowExecutor:
                         activity_before_step = (
                             await self.adb_bridge.get_current_activity(flow.device_id)
                         )
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[FlowExecutor] Could not get activity before step: {e}")
 
                 # Execute step with retry
                 try:
@@ -442,11 +775,12 @@ class FlowExecutor:
                                 logger.debug(
                                     f"  [Backtrack] Navigation depth now: {navigation_depth}"
                                 )
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[FlowExecutor] Could not track activity for backtrack: {e}")
 
                     # Learn Mode: Capture UI elements after screen-changing steps
-                    if learn_mode and success:
+                    # Learn from BOTH successes AND failures (failures help understand what went wrong)
+                    if learn_mode:
                         learn_step_types = {
                             FlowStepType.SCREENSHOT,
                             FlowStepType.LAUNCH_APP,
@@ -466,10 +800,22 @@ class FlowExecutor:
                                     flow.device_id, step_package
                                 )
                                 if learned:
+                                    # Add step outcome context to learned data
+                                    learned['step_success'] = success
+                                    learned['step_type'] = step.step_type.value
+                                    learned['step_index'] = i
+                                    learned['expected_activity'] = getattr(step, 'expected_activity', None)
+
                                     learned_screens.append(learned)
-                                    logger.info(
-                                        f"  [Learn Mode] Captured screen: {learned.get('activity', 'unknown')[:50]}"
-                                    )
+
+                                    if success:
+                                        logger.info(
+                                            f"  [Learn Mode] Captured screen: {learned.get('activity', 'unknown')[:50]}"
+                                        )
+                                    else:
+                                        logger.info(
+                                            f"  [Learn Mode] Captured FAILURE context at: {learned.get('activity', 'unknown')[:50]}"
+                                        )
                             except Exception as learn_err:
                                 logger.warning(
                                     f"  [Learn Mode] Failed to learn screen: {learn_err}"
@@ -501,7 +847,7 @@ class FlowExecutor:
             result.success = result.executed_steps == len(flow.steps)
 
             # Update flow metadata
-            flow.last_executed = datetime.now()
+            flow.last_executed = datetime.now(timezone.utc)
             flow.execution_count += 1
 
             if result.success:
@@ -656,6 +1002,187 @@ class FlowExecutor:
             except Exception as e:
                 logger.error(f"[FlowExecutor] Failed to record metrics: {e}")
 
+        return result
+
+    async def execute_consolidated_flows(
+        self,
+        group: "ConsolidationGroup",
+        device_lock: "asyncio.Lock" = None,
+    ) -> FlowExecutionResult:
+        """
+        Execute a consolidated group of flows as a single optimized batch.
+
+        This method executes multiple flows targeting the same app with a single:
+        - App launch
+        - Unlock cycle
+        - Shared navigation prefix
+
+        Args:
+            group: ConsolidationGroup containing flows to execute
+            device_lock: Optional device lock for ADB operations
+
+        Returns:
+            FlowExecutionResult with combined results from all flows
+        """
+        from .flow_consolidation import ConsolidationGroup
+
+        start_time = time.time()
+
+        # Use first flow for device_id and app info
+        if not group.flows:
+            return FlowExecutionResult(
+                flow_id=group.group_id,
+                success=False,
+                executed_steps=0,
+                error_message="No flows in consolidation group",
+                execution_time_ms=0,
+            )
+
+        primary_flow = group.flows[0]
+        device_id = primary_flow.device_id
+
+        # Create consolidated result
+        result = FlowExecutionResult(
+            flow_id=group.group_id,
+            success=False,
+            executed_steps=0,
+            captured_sensors={},
+            execution_time_ms=0,
+        )
+
+        logger.info(
+            f"[FlowExecutor] Starting consolidated execution: "
+            f"{len(group.flows)} flows, app={group.app_package}, "
+            f"savings={group.estimated_savings_seconds:.1f}s"
+        )
+
+        try:
+            # Auto-wake screen
+            logger.info(f"  [Consolidated] Auto-waking screen")
+            wake_success = await self.adb_bridge.ensure_screen_on(
+                device_id, timeout_ms=3000
+            )
+            if not wake_success:
+                result.error_message = "Failed to wake screen"
+                logger.error(f"  [Consolidated] {result.error_message}")
+                result.execution_time_ms = int((time.time() - start_time) * 1000)
+                return result
+
+            await asyncio.sleep(0.5)
+
+            # Build consolidated step sequence
+            from .flow_consolidation import FlowConsolidator
+
+            consolidator = FlowConsolidator()
+            consolidated_steps = consolidator.build_consolidated_steps(group)
+
+            logger.info(
+                f"  [Consolidated] Built {len(consolidated_steps)} consolidated steps "
+                f"(from {sum(len(f.steps) for f in group.flows)} original steps)"
+            )
+
+            # Execute consolidated steps
+            all_captured_sensors = {}
+            step_results = []
+
+            for i, step in enumerate(consolidated_steps):
+                step_start = time.time()
+                step_desc = step.description or step.step_type
+
+                logger.debug(f"  [Consolidated] Step {i+1}: {step_desc}")
+
+                try:
+                    # Get the handler for this step type
+                    handler = self.step_handlers.get(step.step_type)
+                    if not handler:
+                        logger.warning(
+                            f"  [Consolidated] Unknown step type: {step.step_type}"
+                        )
+                        continue
+
+                    # Execute step (use primary flow's device_id)
+                    step_success, step_details = await handler(
+                        device_id, step, primary_flow
+                    )
+
+                    if step_success:
+                        result.executed_steps += 1
+
+                        # Collect sensor captures
+                        if (
+                            step.step_type == "capture_sensors"
+                            and step_details
+                            and "captures" in step_details
+                        ):
+                            all_captured_sensors.update(step_details["captures"])
+
+                        step_results.append(
+                            StepResult(
+                                step_index=i,
+                                step_type=step.step_type,
+                                description=step_desc,
+                                success=True,
+                                details=step_details or {},
+                            )
+                        )
+                    else:
+                        error_msg = step_details.get("error", "Step failed") if step_details else "Step failed"
+                        step_results.append(
+                            StepResult(
+                                step_index=i,
+                                step_type=step.step_type,
+                                description=step_desc,
+                                success=False,
+                                error_message=error_msg,
+                            )
+                        )
+                        logger.warning(f"  [Consolidated] Step {i+1} failed: {error_msg}")
+
+                except Exception as e:
+                    logger.error(f"  [Consolidated] Step {i+1} error: {e}")
+                    step_results.append(
+                        StepResult(
+                            step_index=i,
+                            step_type=step.step_type,
+                            description=step_desc,
+                            success=False,
+                            error_message=str(e),
+                        )
+                    )
+
+            # Mark success if we captured at least some sensors
+            result.captured_sensors = all_captured_sensors
+            result.step_results = step_results
+            result.success = len(all_captured_sensors) > 0
+
+            # Update each flow's metadata
+            for flow in group.flows:
+                flow.last_executed = datetime.now(timezone.utc)
+                flow.execution_count += 1
+                if result.success:
+                    flow.success_count += 1
+                    flow.last_success = True
+                    flow.last_error = None
+                else:
+                    flow.failure_count += 1
+                    flow.last_success = False
+                    flow.last_error = result.error_message
+                self.flow_manager.update_flow(flow)
+
+            logger.info(
+                f"[FlowExecutor] Consolidated execution completed: "
+                f"{result.executed_steps}/{len(consolidated_steps)} steps, "
+                f"{len(all_captured_sensors)} sensors captured"
+            )
+
+        except Exception as e:
+            result.success = False
+            result.error_message = f"Consolidated execution error: {str(e)}"
+            logger.error(
+                f"[FlowExecutor] Consolidated execution error: {e}", exc_info=True
+            )
+
+        result.execution_time_ms = int((time.time() - start_time) * 1000)
         return result
 
     async def _learn_current_screen(
@@ -976,21 +1503,15 @@ class FlowExecutor:
                 logger.info(f"  App already on correct screen: {expected_activity}")
                 return True
 
-            # Already on correct app (package match) - skip launch if no specific activity required
-            if current_pkg == package and not expected_activity:
-                logger.info(f"  App already in foreground: {package}")
-                return True
-
-            # If we expect a specific activity and aren't on it, force-stop before launch
-            if expected_activity and not activity_match:
+            # App is running but not on expected screen - force-stop for clean restart
+            # This ensures the app starts fresh instead of resuming from an arbitrary screen
+            if current_pkg == package:
                 logger.info(
-                    f"  App not on expected screen ({current}), force stopping before launch..."
+                    f"  App running but not on expected screen, force stopping for clean start..."
                 )
                 await self.adb_bridge.stop_app(device_id, package)
                 await asyncio.sleep(0.5)
-
-            # Different app in foreground? May need to force-stop target first for clean launch
-            if current_pkg and current_pkg != package:
+            elif current_pkg:
                 logger.debug(
                     f"  Different app in foreground: {current_pkg}, will launch {package}"
                 )
@@ -1294,7 +1815,7 @@ class FlowExecutor:
                 # Screen didn't change or expected activity not reached - retry tap once
                 logger.warning("  Screen didn't change after tap, retrying...")
                 await asyncio.sleep(0.3)
-                await self.adb_bridge.tap(device_id, step.x, step.y)
+                await self.adb_bridge.tap(device_id, tap_x, tap_y)
                 await asyncio.sleep(0.8)
 
                 if expected_activity:
@@ -1306,6 +1827,34 @@ class FlowExecutor:
                             f"  Activity {expected_name} detected after retry tap"
                         )
                         return True
+
+                # Navigation FAILED after retry - handle based on mode
+                if expected_activity:
+                    final_activity = await self.adb_bridge.get_current_activity(device_id)
+                    final_name = final_activity.split('/')[-1] if final_activity and '/' in final_activity else final_activity
+
+                    # Record the navigation failure
+                    nav_failure = {
+                        "step_description": step.description or f"Tap at ({tap_x}, {tap_y})",
+                        "expected_activity": expected_activity,
+                        "actual_activity": final_activity,
+                        "tap_coordinates": {"x": tap_x, "y": tap_y},
+                    }
+                    result.navigation_failures.append(nav_failure)
+
+                    if result.strict_mode:
+                        logger.error(
+                            f"  [Strict Mode] Navigation FAILED: Expected {expected_name}, "
+                            f"still on {final_name or 'unknown'}"
+                        )
+                        return False
+
+                    # Non-strict mode: warn but continue (original behavior)
+                    logger.warning(
+                        f"  Navigation failed but continuing (strict_mode=False): "
+                        f"Expected {expected_name}, on {final_name or 'unknown'}"
+                    )
+
             except Exception as e:
                 logger.debug(f"  Could not verify navigation: {e}")
 
@@ -1642,7 +2191,34 @@ class FlowExecutor:
             logger.warning("  capture_sensors step has no sensor_ids")
             return True
 
-        logger.debug(f"  Capturing {len(step.sensor_ids)} sensors")
+        # Check which sensors actually need updating based on their individual intervals
+        sensors_to_capture = []
+        sensors_skipped = []
+
+        for sensor_id in step.sensor_ids:
+            sensor = self.sensor_manager.get_sensor(device_id, sensor_id)
+            if not sensor:
+                # Try stable ID lookup
+                sensor = self._find_sensor_by_stable_id(device_id, sensor_id)
+
+            needs_update, seconds_until = self._sensor_needs_update(sensor, device_id)
+
+            if needs_update:
+                sensors_to_capture.append(sensor_id)
+            else:
+                sensors_skipped.append((sensor_id, sensor.friendly_name if sensor else sensor_id, seconds_until))
+
+        # Log skipped sensors
+        if sensors_skipped:
+            skipped_names = [f"{name} ({int(secs)}s remaining)" for _, name, secs in sensors_skipped]
+            logger.info(f"  [Interval] Skipping {len(sensors_skipped)} sensors (not due yet): {', '.join(skipped_names)}")
+
+        # If ALL sensors can be skipped, return early (saves screenshot + UI dump time)
+        if not sensors_to_capture:
+            logger.info(f"  [Interval] All {len(step.sensor_ids)} sensors skipped - none due for update")
+            return True  # Success - nothing to capture, but not a failure
+
+        logger.debug(f"  Capturing {len(sensors_to_capture)}/{len(step.sensor_ids)} sensors (interval-based filtering)")
 
         try:
             # 0a. Quick check for NotificationShade/StatusBar - dismiss immediately if present
@@ -1897,9 +2473,11 @@ class FlowExecutor:
             )
 
             # 3. Extract each sensor and collect for batch publishing
+            # Only process sensors that need updating (filtered by interval above)
             sensor_updates = []  # List of (sensor, value) tuples for batch publishing
             cached_count = 0
-            for sensor_id in step.sensor_ids:
+            interval_skipped_count = len(step.sensor_ids) - len(sensors_to_capture)
+            for sensor_id in sensors_to_capture:
                 # Check session cache first - avoid redundant captures
                 if sensor_id in self._session_captured_sensors:
                     cached_value = self._session_captured_sensors[sensor_id]
@@ -1977,7 +2555,7 @@ class FlowExecutor:
                     # Collect for batch publishing (20-30% faster than individual)
                     sensor_updates.append((sensor, value))
 
-                    # Optionally update stored bounds if element moved significantly
+                    # Check if element moved significantly from stored position
                     if (
                         match.method != "stored_bounds"
                         and stored_bounds
@@ -1987,15 +2565,51 @@ class FlowExecutor:
                             stored_bounds, match.bounds
                         )
                         if not is_similar and distance > 10:  # Moved more than 10px
-                            logger.info(
-                                f"  Element moved {distance:.0f}px - consider updating sensor bounds"
-                            )
+                            if result.repair_mode:
+                                # Auto-repair: Update sensor bounds
+                                logger.info(
+                                    f"  [Repair Mode] Element moved {distance:.0f}px - auto-updating bounds"
+                                )
+                                try:
+                                    # Update the sensor's element bounds
+                                    old_bounds = sensor.element_bounds.copy() if sensor.element_bounds else None
+                                    sensor.element_bounds = match.bounds
+                                    self.sensor_manager.update_sensor(sensor)
+
+                                    # Track the repair in result
+                                    result.bounds_repaired.append({
+                                        "sensor_id": sensor_id,
+                                        "sensor_name": sensor.friendly_name,
+                                        "old_bounds": old_bounds,
+                                        "new_bounds": match.bounds,
+                                        "drift_distance": distance,
+                                        "detection_method": match.method,
+                                    })
+                                    logger.info(
+                                        f"  [Repair Mode] Updated bounds for {sensor.friendly_name}"
+                                    )
+                                except Exception as repair_err:
+                                    logger.warning(
+                                        f"  [Repair Mode] Failed to update bounds: {repair_err}"
+                                    )
+                            else:
+                                logger.info(
+                                    f"  Element moved {distance:.0f}px - consider updating sensor bounds (use repair_mode=true to auto-fix)"
+                                )
 
                 except Exception as e:
                     logger.error(f"  Failed to extract sensor {sensor_id}: {e}")
                     # Continue with other sensors (don't fail entire step)
 
-            # 4. Batch publish all sensor states at once (20-30% faster)
+            # 4. Ensure MQTT discovery is published before state (auto-recreates deleted entities)
+            if sensor_updates:
+                for sensor, _ in sensor_updates:
+                    try:
+                        await self.mqtt_manager.publish_discovery(sensor)
+                    except Exception as e:
+                        logger.debug(f"  Discovery publish for {sensor.sensor_id}: {e}")
+
+            # 5. Batch publish all sensor states at once (20-30% faster)
             if sensor_updates:
                 batch_result = await self.mqtt_manager.publish_state_batch(
                     sensor_updates
@@ -2004,10 +2618,10 @@ class FlowExecutor:
                     f"  Batch published {batch_result['success']}/{len(sensor_updates)} sensors to MQTT"
                 )
 
-                # 5. Persist captured sensor values to disk (fixes stale current_value issue)
+                # 6. Persist captured sensor values to disk (fixes stale current_value issue)
                 for sensor, value in sensor_updates:
                     sensor.current_value = str(value) if value is not None else None
-                    sensor.last_updated = datetime.now()
+                    sensor.last_updated = datetime.now(timezone.utc)
                     self.sensor_manager.update_sensor(sensor)
                     logger.debug(f"  Persisted {sensor.friendly_name} = {value}")
 
@@ -2020,7 +2634,13 @@ class FlowExecutor:
                 logger.info(
                     f"  Session cache: {cached_count}/{total_sensors} from cache, {fresh_count} freshly captured"
                 )
-            if fresh_count == 0 and cached_count == 0:
+            if interval_skipped_count > 0:
+                logger.debug(
+                    f"  Interval skip: {interval_skipped_count}/{total_sensors} skipped (not due for update)"
+                )
+            # Only fail if no sensors were captured AND none were skipped by interval
+            # (interval-skipped sensors are intentional, not failures)
+            if fresh_count == 0 and cached_count == 0 and interval_skipped_count == 0:
                 logger.warning(f"  No sensors captured (0/{total_sensors})")
                 return False
 

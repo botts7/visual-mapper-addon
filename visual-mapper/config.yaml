@@ -1,49 +1,109 @@
+# Home Assistant Add-on Configuration
+# https://developers.home-assistant.io/docs/add-ons/configuration
+
 name: Visual Mapper
-version: 0.3.5
+version: 0.4.0-beta.3.65
 slug: visual_mapper
-# image: ghcr.io/botts7/visual-mapper-{arch}  # Enable after testing
 description: Android device control and sensor creation for Home Assistant via ADB
 url: https://github.com/botts7/visual-mapper
+
+# Supported architectures
 arch:
-  - amd64
   - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+
+# Startup configuration
 init: false
 startup: application
+boot: auto
+
+# Host network access required for ADB connections
 host_network: true
+
+# Ports
 ports:
   8080/tcp: 8080
+
 ports_description:
-  8080/tcp: Web UI
-ingress: false
+  8080/tcp: Web UI (HTTP)
+
+# WebUI configuration
 webui: http://[HOST]:[PORT:8080]
 panel_icon: mdi:android
 panel_title: Visual Mapper
+panel_admin: false
+ingress: false
+
+# Add-on options
 options:
-  server_port: 8080
-  mqtt_broker: core-mosquitto
+  adb_device_ip: ""
+  adb_device_port: 5555
+  mqtt_broker: "core-mosquitto"
   mqtt_port: 1883
   mqtt_username: ""
   mqtt_password: ""
+  mqtt_discovery_prefix: "homeassistant"
+  auto_start_updates: true
   log_level: info
-  ml_training_mode: disabled
+  connection_check_interval: 30
+  connection_retry_enabled: true
+  connection_max_retry_delay: 300
+  ml_training_mode: "disabled"
   ml_remote_host: ""
   ml_remote_port: 8099
   ml_use_dqn: false
   ml_batch_size: 64
   ml_save_interval: 60
+  labs_flow_consolidation: false
+
+# Options schema
 schema:
-  server_port: port
+  adb_device_ip: str?
+  adb_device_port: port
   mqtt_broker: str
   mqtt_port: port
   mqtt_username: str?
   mqtt_password: password?
+  mqtt_discovery_prefix: str
+  auto_start_updates: bool
   log_level: list(debug|info|warning|error)
+  connection_check_interval: int(5,300)
+  connection_retry_enabled: bool
+  connection_max_retry_delay: int(60,600)
   ml_training_mode: list(disabled|local|remote)
   ml_remote_host: str?
   ml_remote_port: port?
   ml_use_dqn: bool
   ml_batch_size: int(16,256)
   ml_save_interval: int(10,300)
+  labs_flow_consolidation: bool?
+
+# Service dependencies (want = optional, need = required)
+services:
+  - mqtt:want
+
+# Container image - commented out to build locally
+# image: ghcr.io/botts7/visual-mapper-{arch}
+
+# Map directories
 map:
   - config:rw
+  - ssl:ro
+
+# USB access for ADB
 usb: true
+devices:
+  - /dev/bus/usb
+
+# ADB requires privileged access for network debugging
+apparmor: false
+
+# Translations
+translations:
+  en: translations/en.yaml
+
+# Backup configuration (hot = backup while running, cold = stop before backup)
+backup: cold

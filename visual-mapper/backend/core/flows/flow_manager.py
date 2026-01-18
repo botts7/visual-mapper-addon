@@ -52,6 +52,31 @@ class FlowManager:
             f"templates: {self.template_dir.absolute()}, data_dir: {self.data_dir.absolute()}"
         )
 
+    def reload_flows(self, device_id: str = None):
+        """
+        Clear cached flows and reload from disk.
+
+        Called after device migration to pick up updated device_id fields.
+
+        Args:
+            device_id: If specified, only reload flows for this device.
+                      If None, clear all cached flows.
+        """
+        if device_id:
+            # Clear specific device cache
+            if device_id in self._flows:
+                del self._flows[device_id]
+            logger.info(f"[FlowManager] Cleared cache for device {device_id}")
+        else:
+            # Clear all caches
+            self._flows.clear()
+            logger.info("[FlowManager] Cleared all flow caches")
+
+    # Alias for backward compatibility with main.py
+    def _load_all_flows(self):
+        """Alias for reload_flows() - clears cache to force reload from disk"""
+        self.reload_flows()
+
     def _get_flow_file(self, device_id: str) -> Path:
         """
         Get flow file path for device.
@@ -166,12 +191,17 @@ class FlowManager:
 
     def get_all_flows(self) -> List[SensorCollectionFlow]:
         """
-        Get all flows across all devices
+        Get all flows across all devices, deduplicated by flow_id.
+
+        If the same flow_id appears in multiple device files (e.g., due to
+        device IP/port changes), prefer the one with the most recent
+        last_executed timestamp.
 
         Returns:
-            List of all flows from all devices
+            List of all unique flows from all devices
         """
-        all_flows = []
+        # Use dict to deduplicate by flow_id
+        flows_by_id: Dict[str, SensorCollectionFlow] = {}
 
         # Get all device flow files
         for flow_file in self.storage_dir.glob("flows_*.json"):
@@ -179,11 +209,32 @@ class FlowManager:
                 with open(flow_file, "r") as f:
                     data = json.load(f)
                     flow_list = FlowList(**data)
-                    all_flows.extend(flow_list.flows)
+                    for flow in flow_list.flows:
+                        existing = flows_by_id.get(flow.flow_id)
+                        if existing is None:
+                            # First time seeing this flow_id
+                            flows_by_id[flow.flow_id] = flow
+                        else:
+                            # Duplicate flow_id - keep the one with more recent execution
+                            # or higher execution count
+                            new_exec_time = flow.last_executed or ""
+                            existing_exec_time = existing.last_executed or ""
+                            new_exec_count = flow.execution_count or 0
+                            existing_exec_count = existing.execution_count or 0
+
+                            if new_exec_time > existing_exec_time or (
+                                new_exec_time == existing_exec_time
+                                and new_exec_count > existing_exec_count
+                            ):
+                                logger.debug(
+                                    f"[FlowManager] Dedup: replacing {flow.flow_id} "
+                                    f"(device {existing.device_id} -> {flow.device_id})"
+                                )
+                                flows_by_id[flow.flow_id] = flow
             except Exception as e:
                 logger.error(f"[FlowManager] Failed to load {flow_file}: {e}")
 
-        return all_flows
+        return list(flows_by_id.values())
 
     def update_flow(self, flow: SensorCollectionFlow) -> bool:
         """Update an existing flow"""

@@ -116,6 +116,27 @@ class DeviceIdentityResolver:
             True if this is a new device or updated connection, False otherwise
         """
         with self._lock:
+            # Check for duplicate: connection_id may have been used as stable_id before
+            # This happens when device was registered before stable ID could be obtained
+            if connection_id in self._device_info and connection_id != stable_device_id:
+                logger.info(
+                    f"[DeviceIdentity] Merging duplicate: {connection_id} -> {stable_device_id}"
+                )
+                # Migrate any useful data from the old entry
+                old_info = self._device_info[connection_id]
+                if not device_model and old_info.get("model"):
+                    device_model = old_info.get("model")
+                if not device_manufacturer and old_info.get("manufacturer"):
+                    device_manufacturer = old_info.get("manufacturer")
+                # Remove the duplicate entry
+                del self._device_info[connection_id]
+                if connection_id in self._stable_to_conn:
+                    del self._stable_to_conn[connection_id]
+                # Clean up conn_to_stable entries pointing to old key
+                for conn, stable in list(self._conn_to_stable.items()):
+                    if stable == connection_id:
+                        del self._conn_to_stable[conn]
+
             is_new = stable_device_id not in self._stable_to_conn
             old_conn = self._stable_to_conn.get(stable_device_id)
 
@@ -215,6 +236,54 @@ class DeviceIdentityResolver:
             # Unknown - return as-is (might be a new device)
             return device_id
 
+    def resolve_to_connection_id(self, device_id: str) -> Optional[str]:
+        """
+        Resolve any device ID to the current connection ID.
+
+        This is the inverse of resolve_any_id() - instead of returning
+        the stable ID, it returns the current connection ID (IP:port).
+
+        Args:
+            device_id: Either connection_id (IP:port) or stable_device_id
+
+        Returns:
+            Current connection_id if device is connected, None if not found
+        """
+        with self._lock:
+            # If it's already a connection_id and device is registered, return it
+            if device_id in self._conn_to_stable:
+                return device_id
+
+            # If it's a stable_device_id, get the current connection
+            if device_id in self._stable_to_conn:
+                return self._stable_to_conn[device_id]
+
+            # Try resolving through legacy ID
+            if device_id in self._legacy_to_stable:
+                stable_id = self._legacy_to_stable[device_id]
+                return self._stable_to_conn.get(stable_id)
+
+            # Unknown ID - not connected
+            return None
+
+    def is_same_device(self, id1: str, id2: str) -> bool:
+        """
+        Check if two device IDs refer to the same physical device.
+
+        Useful for comparing IDs that may be in different formats
+        (connection ID vs stable ID).
+
+        Args:
+            id1: First device ID (any format)
+            id2: Second device ID (any format)
+
+        Returns:
+            True if both IDs resolve to the same stable device
+        """
+        stable1 = self.resolve_any_id(id1)
+        stable2 = self.resolve_any_id(id2)
+        return stable1 == stable2
+
     def register_legacy_id(self, legacy_id: str, stable_device_id: str):
         """
         Register a legacy ID that should map to a stable device ID.
@@ -253,6 +322,49 @@ class DeviceIdentityResolver:
                     }
                 )
             return devices
+
+    def forget_device(self, device_id: str) -> bool:
+        """
+        Remove a device from persistent storage (forget it completely).
+
+        Args:
+            device_id: Either stable_device_id or connection_id (IP:port)
+
+        Returns:
+            True if device was found and removed, False otherwise
+        """
+        with self._lock:
+            # Try to resolve to stable_id first
+            stable_id = None
+
+            # Check if it's already a stable_id
+            if device_id in self._device_info:
+                stable_id = device_id
+            # Check if it's a connection_id
+            elif device_id in self._conn_to_stable:
+                stable_id = self._conn_to_stable[device_id]
+
+            if not stable_id:
+                logger.warning(f"[DeviceIdentity] Device {device_id} not found in registry")
+                return False
+
+            # Remove from all mappings
+            conn_id = self._stable_to_conn.get(stable_id)
+            if conn_id and conn_id in self._conn_to_stable:
+                del self._conn_to_stable[conn_id]
+            if stable_id in self._stable_to_conn:
+                del self._stable_to_conn[stable_id]
+            if stable_id in self._device_info:
+                del self._device_info[stable_id]
+
+            # Also check legacy mappings
+            legacy_to_remove = [k for k, v in self._legacy_to_stable.items() if v == stable_id]
+            for legacy_id in legacy_to_remove:
+                del self._legacy_to_stable[legacy_id]
+
+            self._save_mapping()
+            logger.info(f"[DeviceIdentity] Forgot device {stable_id} (was {device_id})")
+            return True
 
     def sanitize_for_filename(self, device_id: str) -> str:
         """

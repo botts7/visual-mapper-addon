@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 import time
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional
@@ -44,10 +45,12 @@ class ADBBridge:
     Uses ADBManager to automatically select optimal connection method.
     """
 
-    def __init__(self):
+    def __init__(self, data_dir: str = None):
         """Initialize ADB bridge with ADBManager"""
         self.manager = ADBManager(hass=None)  # Standalone mode
         self.devices: Dict[str, BaseADBConnection] = {}
+        # Data directory for security config lookup (set via set_data_dir or constructor)
+        self._data_dir = data_dir
         self._adb_lock = (
             asyncio.Lock()
         )  # Global lock for device scanning operations only
@@ -126,6 +129,35 @@ class ADBBridge:
         self._backend_sample_counter: Dict[str, int] = {}  # {device_id: total_captures}
 
         logger.info("[ADBBridge] Initialized (Phase 2 - hybrid connection strategy)")
+
+        # Load persisted backend preferences from settings.json
+        self._load_persisted_preferences()
+
+    def _load_persisted_preferences(self):
+        """Load capture_backend preferences from settings.json on startup"""
+        import json
+        from pathlib import Path
+
+        # Find settings.json - check DATA_DIR env var first, then fallback to ./data
+        data_dir = Path(os.environ.get("DATA_DIR", "data"))
+        settings_file = data_dir / "settings.json"
+
+        try:
+            if settings_file.exists():
+                with open(settings_file, "r") as f:
+                    settings = json.load(f)
+
+                # Load device backend preferences
+                device_prefs = settings.get("device_backend_prefs", {})
+                for device_id, prefs in device_prefs.items():
+                    capture_backend = prefs.get("capture_backend")
+                    if capture_backend and capture_backend != "auto":
+                        self._preferred_backend[device_id] = capture_backend
+                        logger.info(
+                            f"[ADBBridge] Loaded persisted capture_backend for {device_id}: {capture_backend}"
+                        )
+        except Exception as e:
+            logger.warning(f"[ADBBridge] Failed to load persisted preferences: {e}")
 
     async def _run_shell_adaptive(
         self, device_id: str, command: str, conn=None
@@ -268,28 +300,20 @@ class ADBBridge:
         if conn:
             return conn, device_id
 
-        # Try to resolve stable ID to connection ID
+        # Try to resolve using centralized device identity resolver
         try:
             from services.device_identity import get_device_identity_resolver
 
             data_dir = os.environ.get("DATA_DIR", "data")
             resolver = get_device_identity_resolver(data_dir)
 
-            current_conn_id = resolver.get_connection_id(device_id)
+            # Use centralized resolution to get connection ID
+            current_conn_id = resolver.resolve_to_connection_id(device_id)
             if current_conn_id and current_conn_id in self.devices:
                 logger.debug(
                     f"[ADBBridge] Resolved {device_id} -> {current_conn_id} via identity resolver"
                 )
                 return self.devices[current_conn_id], current_conn_id
-
-            stable_id = resolver.resolve_any_id(device_id)
-            if stable_id != device_id:
-                current_conn_id = resolver.get_connection_id(stable_id)
-                if current_conn_id and current_conn_id in self.devices:
-                    logger.debug(
-                        f"[ADBBridge] Resolved {device_id} -> {current_conn_id} via stable ID {stable_id}"
-                    )
-                    return self.devices[current_conn_id], current_conn_id
         except Exception as e:
             logger.debug(f"[ADBBridge] Device identity resolution failed: {e}")
 
@@ -875,19 +899,41 @@ class ADBBridge:
 
     async def disconnect_device(self, device_id: str) -> None:
         """
-        Disconnect from device.
+        Disconnect from device and remove from ADB daemon.
 
         Args:
             device_id: Device identifier
         """
         if device_id not in self.devices:
-            logger.warning(f"[ADBBridge] Device {device_id} not found")
+            logger.warning(f"[ADBBridge] Device {device_id} not found in active connections")
+            # Still try to disconnect from ADB daemon in case it's a stale connection
+            try:
+                result = subprocess.run(
+                    ["adb", "disconnect", device_id],
+                    capture_output=True,
+                    timeout=5
+                )
+                logger.info(f"[ADBBridge] ADB daemon disconnect: {result.stdout.decode().strip()}")
+            except Exception as e:
+                logger.debug(f"[ADBBridge] ADB disconnect command failed: {e}")
             return
 
         try:
             conn = self.devices[device_id]
             await conn.close()
             del self.devices[device_id]
+
+            # Tell ADB daemon to forget this device so it won't be re-discovered
+            try:
+                result = subprocess.run(
+                    ["adb", "disconnect", device_id],
+                    capture_output=True,
+                    timeout=5
+                )
+                logger.info(f"[ADBBridge] ADB daemon disconnect: {result.stdout.decode().strip()}")
+            except Exception as e:
+                logger.warning(f"[ADBBridge] ADB disconnect command failed: {e}")
+
             logger.info(f"[ADBBridge] Disconnected from {device_id}")
         except Exception as e:
             logger.error(f"[ADBBridge] Error disconnecting {device_id}: {e}")
@@ -2103,14 +2149,14 @@ class ADBBridge:
                     for pkg in screensaver_packages:
                         try:
                             await conn.shell(f"am force-stop {pkg}")
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[ADBBridge] Could not force-stop {pkg}: {e}")
                     await asyncio.sleep(0.3)
                     # Method 3: Use service call to stop dream
                     try:
                         await conn.shell("service call dreams 5")  # stopDream
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[ADBBridge] Could not stop dream service: {e}")
                     await asyncio.sleep(0.2)
             except Exception as e:
                 logger.debug(f"[ADBBridge] Screensaver dismiss attempt: {e}")
@@ -2213,8 +2259,8 @@ class ADBBridge:
         try:
             mfr_output = await conn.shell("getprop ro.product.manufacturer")
             manufacturer = mfr_output.strip().lower()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"[ADBBridge] Could not get manufacturer: {e}")
 
         is_samsung = "samsung" in manufacturer
 
@@ -2236,7 +2282,8 @@ class ADBBridge:
                 else:
                     width, height = 1920, 1200  # Default for tablets
                 center_x = width // 2
-            except:
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get screen size, using defaults: {e}")
                 width, height = 1920, 1200
                 center_x = width // 2
 
@@ -2323,40 +2370,38 @@ class ADBBridge:
         has_pin_configured = False
         if skip_swipe_if_pin:
             try:
-                from utils.device_security import SecurityManager, LockStrategy
+                from utils.device_security import DeviceSecurityManager, LockStrategy
 
-                security_mgr = SecurityManager()
+                # Use the correct data_dir for security config lookup
+                data_dir = self._data_dir if self._data_dir else "data"
+                security_mgr = DeviceSecurityManager(data_dir=data_dir)
 
-                # Try device_id first
-                logger.info(f"[ADBBridge] PIN lookup: checking device_id={device_id}")
-                config = security_mgr.get_lock_config(device_id)
-                lookup_id = device_id
+                # Always use stable_id for config lookup (configs are stored by stable_id)
+                stable_id = await self.get_device_serial(device_id)
+                lookup_id = stable_id if stable_id else device_id
+                logger.info(f"[ADBBridge] PIN lookup: using stable_id={lookup_id}")
 
-                # Fallback to stable_id if no config found
-                if not config:
-                    stable_id = await self.get_device_serial(device_id)
-                    logger.info(
-                        f"[ADBBridge] PIN lookup: no config for device_id, trying stable_id={stable_id}"
-                    )
-                    if stable_id and stable_id != device_id:
-                        config = security_mgr.get_lock_config(stable_id)
-                        if config:
-                            lookup_id = stable_id
+                config = security_mgr.get_lock_config(lookup_id)
 
                 if config:
+                    strategy = config.get('strategy')
                     logger.info(
-                        f"[ADBBridge] PIN lookup: found config for {lookup_id}, strategy={config.get('strategy')}"
+                        f"[ADBBridge] PIN lookup: found config for {lookup_id}, strategy={strategy}"
                     )
-                    if config.get("strategy") == LockStrategy.AUTO_UNLOCK.value:
-                        # Use the same ID that had the config for passcode lookup
+                    if strategy == LockStrategy.AUTO_UNLOCK.value:
                         passcode = security_mgr.get_passcode(lookup_id)
                         has_pin_configured = bool(passcode)
                         logger.info(
                             f"[ADBBridge] PIN lookup: passcode found={has_pin_configured}"
                         )
+                    elif strategy == LockStrategy.MANUAL_ONLY.value:
+                        logger.warning(
+                            f"[ADBBridge] Device {device_id} has MANUAL_ONLY unlock strategy - user must unlock manually"
+                        )
                 else:
-                    logger.info(
-                        f"[ADBBridge] PIN lookup: no config found for device_id or stable_id"
+                    logger.warning(
+                        f"[ADBBridge] No unlock config found for device {device_id} (stable_id={lookup_id}). "
+                        f"Configure auto-unlock in Device Settings to enable automatic PIN entry."
                     )
             except Exception as e:
                 logger.warning(f"[ADBBridge] PIN lookup failed: {e}")
@@ -2375,7 +2420,8 @@ class ADBBridge:
                 (int(match.group(1)), int(match.group(2))) if match else (1920, 1200)
             )
             center_x = width // 2
-        except:
+        except Exception as e:
+            logger.debug(f"[ADBBridge] Could not get Samsung screen size: {e}")
             width, height, center_x = 1920, 1200, 960
 
         for retry in range(max_retries):
@@ -2731,8 +2777,8 @@ class ADBBridge:
                 mfr_output = await conn.shell("getprop ro.product.manufacturer")
                 manufacturer = mfr_output.strip().lower()
                 logger.info(f"[ADBBridge] Device manufacturer: {manufacturer}")
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get manufacturer for unlock: {e}")
 
             # Check screen state: dumpsys power | grep mWakefulness or mScreenOn
             async def is_screen_on():
@@ -2741,7 +2787,8 @@ class ADBBridge:
                         "dumpsys power | grep -E 'mWakefulness|mScreenOn'"
                     )
                     return "Awake" in power_state or "mScreenOn=true" in power_state
-                except:
+                except Exception as e:
+                    logger.debug(f"[ADBBridge] Could not check screen state: {e}")
                     return False
 
             # Check if already unlocked
@@ -2759,7 +2806,8 @@ class ADBBridge:
                     if match
                     else (1920, 1200)
                 )
-            except:
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get screen size for unlock: {e}")
                 width, height = 1920, 1200
             center_x = width // 2
             logger.debug(f"[ADBBridge] Screen dimensions: {width}x{height}")
@@ -2895,8 +2943,8 @@ class ADBBridge:
                     conn.shell("getprop ro.product.manufacturer"), timeout=2.0
                 )
                 manufacturer = mfr.strip().lower()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get manufacturer for lock check: {e}")
 
             is_samsung = "samsung" in manufacturer
 
@@ -3017,8 +3065,8 @@ class ADBBridge:
                     ),
                     timeout=2.0,
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get power state: {e}")
 
             try:
                 lock_flags = await asyncio.wait_for(
@@ -3027,8 +3075,8 @@ class ADBBridge:
                     ),
                     timeout=2.0,
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get lock flags: {e}")
 
             try:
                 keyguard_state = await asyncio.wait_for(
@@ -3037,15 +3085,15 @@ class ADBBridge:
                     ),
                     timeout=2.0,
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get keyguard state: {e}")
 
             try:
                 current_focus = await asyncio.wait_for(
                     conn.shell("dumpsys activity | grep mCurrentFocus"), timeout=2.0
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"[ADBBridge] Could not get current focus: {e}")
 
             # 1. Check if screen is off
             if "mWakefulness=Asleep" in power_state or "state=OFF" in power_state:
@@ -3501,8 +3549,8 @@ class ADBBridge:
                                     aapt_count += 1
                                     continue
 
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[ADBBridge] AAPT label extraction failed for {package}: {e}")
 
                 logger.info(
                     f"[ADBBridge] ✅ AAPT extracted {aapt_count} additional labels"
@@ -3615,8 +3663,8 @@ class ADBBridge:
                 # Method 1: Stop dream service
                 try:
                     await conn.shell("service call dreams 5")  # stopDream
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ADBBridge] Stop dream service failed: {e}")
 
                 # Method 2: Force-stop known screensaver packages
                 screensaver_packages = [
@@ -3628,8 +3676,8 @@ class ADBBridge:
                 for pkg in screensaver_packages:
                     try:
                         await conn.shell(f"am force-stop {pkg}")
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[ADBBridge] Force-stop {pkg} failed: {e}")
 
                 # Method 3: Close system dialogs first (prevents NotificationShade on Samsung)
                 await conn.shell(
@@ -3699,11 +3747,13 @@ class ADBBridge:
                         # Try to get passcode from security manager
                         try:
                             from utils.device_security import (
-                                SecurityManager,
+                                DeviceSecurityManager,
                                 LockStrategy,
                             )
 
-                            security_mgr = SecurityManager()
+                            # Use the correct data_dir for security config lookup
+                            data_dir = self._data_dir if self._data_dir else "data"
+                            security_mgr = DeviceSecurityManager(data_dir=data_dir)
                             config = security_mgr.get_lock_config(device_id)
 
                             # Also try stable_device_id
@@ -3737,11 +3787,13 @@ class ADBBridge:
                                         )
                                 else:
                                     logger.warning(
-                                        f"[ADBBridge] No passcode found for PIN unlock"
+                                        f"[ADBBridge] No passcode found for device. "
+                                        f"Configure auto-unlock in Device Settings to enable automatic unlock."
                                     )
                             else:
                                 logger.warning(
-                                    f"[ADBBridge] Device still locked, no AUTO_UNLOCK config"
+                                    f"[ADBBridge] Device {device_id} is locked but no auto-unlock configured. "
+                                    f"Please configure Lock Screen settings in Device Settings page."
                                 )
                         except Exception as e:
                             logger.warning(
@@ -3888,8 +3940,8 @@ class ADBBridge:
                 f"[ADBBridge]   3. Disable notification reminder: Settings > Notifications > Advanced"
             )
             logger.warning(f"[ADBBridge]   4. The flow will retry on next schedule")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"[ADBBridge] Final UI check failed: {e}")
 
         return False
 

@@ -214,20 +214,55 @@ async def execute_flow_on_demand(
     learn_mode: bool = Query(
         default=False, description="Capture UI elements to improve navigation graph"
     ),
+    strict_mode: bool = Query(
+        default=False, description="Fail steps when navigation doesn't reach expected screen"
+    ),
+    repair_mode: bool = Query(
+        default=False, description="Auto-update element bounds when drift detected"
+    ),
+    force_execute: bool = Query(
+        default=False, description="Execute ALL steps regardless of sensor update intervals"
+    ),
     service: FlowService = Depends(get_flow_service),
 ):
     """
-    Execute a flow on-demand.
+    Execute a flow on-demand with configurable execution modes.
 
     Args:
         device_id: Device identifier
         flow_id: Flow identifier
-        learn_mode: If True, capture UI elements at each screen and update navigation graph.
-                   This makes execution slower but improves future Smart Flow generation.
+        learn_mode: Capture UI elements at each screen for navigation improvement
+        strict_mode: Fail on navigation errors instead of continuing (helps find broken flows)
+        repair_mode: Auto-fix element bounds when drift detected (self-healing)
+        force_execute: Run ALL steps, ignoring sensor intervals (for manual testing)
+
+    Recommended mode combinations:
+        - Production scheduled: repair_mode=true (auto-fix drift silently)
+        - Manual testing: force_execute=true, strict_mode=true, learn_mode=true
+        - Debug/troubleshoot: force_execute=true, strict_mode=true, learn_mode=true
+        - New flow validation: all modes enabled
     """
     try:
-        logger.info(f"[API] Execute flow {flow_id} with learn_mode={learn_mode}")
-        return await service.execute_flow(device_id, flow_id, learn_mode=learn_mode)
+        modes = []
+        if learn_mode:
+            modes.append("learn")
+        if strict_mode:
+            modes.append("strict")
+        if repair_mode:
+            modes.append("repair")
+        if force_execute:
+            modes.append("force")
+        mode_str = f" modes=[{','.join(modes)}]" if modes else ""
+        logger.info(f"[API] Execute flow {flow_id}{mode_str}")
+
+        return await service.execute_flow(
+            device_id,
+            flow_id,
+            learn_mode=learn_mode,
+            strict_mode=strict_mode,
+            repair_mode=repair_mode,
+            force_execute=force_execute,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -371,6 +406,21 @@ async def create_flow_from_template(template_id: str, request: dict):
             raise HTTPException(
                 status_code=409, detail="Flow already exists or could not be created"
             )
+
+        # CRITICAL: Reload scheduler to register periodic task for the new flow
+        # Without this, flows created from templates won't run on schedule
+        if device_id and flow.enabled:
+            if hasattr(deps, "flow_scheduler") and deps.flow_scheduler:
+                try:
+                    await deps.flow_scheduler.reload_flows(device_id)
+                    logger.info(
+                        f"[API] Reloaded scheduler for device {device_id} after template flow creation"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[API] Failed to reload scheduler after template flow creation: {e}"
+                    )
+
         return {"success": True, "flow": flow.dict()}
     except HTTPException:
         raise
@@ -691,6 +741,204 @@ async def clear_all_queues():
         return {"success": False, "message": "Scheduler not available"}
     except Exception as e:
         logger.error(f"[API] Failed to clear queues: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduler/execution-status")
+async def get_execution_status():
+    """
+    Get detailed execution status for all flows.
+
+    Returns information about why flows may not be running:
+    - Device connection status
+    - Scheduler state (running/paused)
+    - Queue depths
+    - Last execution details
+    - Issues/blockers
+    """
+    deps = get_deps()
+    result = {
+        "scheduler_running": False,
+        "scheduler_paused": False,
+        "connected_devices": [],
+        "flows": []
+    }
+
+    try:
+        # Get connected devices (use get_devices(), same as /adb/devices endpoint)
+        if deps.adb_bridge:
+            try:
+                devices = await deps.adb_bridge.get_devices()
+                result["connected_devices"] = [d.get("id") for d in devices if d.get("connected")]
+            except Exception as e:
+                logger.warning(f"[API] Could not get connected devices: {e}")
+
+        # Get scheduler status
+        if hasattr(deps, "flow_scheduler") and deps.flow_scheduler:
+            scheduler_status = deps.flow_scheduler.get_status()
+            result["scheduler_running"] = scheduler_status.get("running", False)
+            result["scheduler_paused"] = scheduler_status.get("paused", False)
+            result["total_periodic_tasks"] = scheduler_status.get("total_periodic_tasks", 0)
+
+        # Get all flows with their execution status
+        if deps.flow_manager:
+            all_flows = deps.flow_manager.get_all_flows()
+
+            for flow in all_flows:
+                flow_status = {
+                    "flow_id": flow.flow_id,
+                    "device_id": flow.device_id,
+                    "stable_device_id": flow.stable_device_id,
+                    "name": flow.name,
+                    "enabled": flow.enabled,
+                    "last_executed": flow.last_executed,
+                    "last_success": flow.last_success,
+                    "last_error": flow.last_error,
+                    "execution_count": flow.execution_count,
+                    "update_interval_seconds": flow.update_interval_seconds,
+                    "issues": []
+                }
+
+                # Check for issues
+                device_connected = flow.device_id in result["connected_devices"]
+
+                # Also check if stable_device_id matches any connected device
+                if not device_connected and flow.stable_device_id:
+                    from services.device_identity import get_device_identity_resolver
+                    try:
+                        resolver = get_device_identity_resolver()
+                        current_conn = resolver.get_connection_id(flow.stable_device_id)
+                        if current_conn and current_conn in result["connected_devices"]:
+                            device_connected = True
+                            flow_status["resolved_device_id"] = current_conn
+                    except Exception:
+                        pass
+
+                if not flow.enabled:
+                    flow_status["issues"].append({
+                        "type": "disabled",
+                        "message": "Flow is disabled"
+                    })
+                elif not device_connected:
+                    flow_status["issues"].append({
+                        "type": "device_disconnected",
+                        "message": f"Device {flow.device_id} is not connected"
+                    })
+                elif result["scheduler_paused"]:
+                    flow_status["issues"].append({
+                        "type": "scheduler_paused",
+                        "message": "Scheduler is paused"
+                    })
+                elif not result["scheduler_running"]:
+                    flow_status["issues"].append({
+                        "type": "scheduler_stopped",
+                        "message": "Scheduler is not running"
+                    })
+
+                # Calculate time since last execution
+                if flow.last_executed:
+                    try:
+                        from datetime import datetime
+                        last_exec = datetime.fromisoformat(flow.last_executed.replace('Z', '+00:00'))
+                        now = datetime.now(last_exec.tzinfo) if last_exec.tzinfo else datetime.now()
+                        seconds_since = (now - last_exec).total_seconds()
+                        flow_status["seconds_since_last_execution"] = int(seconds_since)
+
+                        # Check if overdue
+                        if seconds_since > flow.update_interval_seconds * 2:
+                            if not flow_status["issues"]:  # Only add if no other issues
+                                flow_status["issues"].append({
+                                    "type": "overdue",
+                                    "message": f"Last run {int(seconds_since/60)} minutes ago (interval: {int(flow.update_interval_seconds/60)} min)"
+                                })
+                    except Exception as e:
+                        logger.debug(f"[API] Could not calculate time since execution: {e}")
+
+                result["flows"].append(flow_status)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[API] Failed to get execution status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduler/activity")
+async def get_scheduler_activity(limit: int = Query(default=50, ge=1, le=100)):
+    """
+    Get recent scheduler activity log for UI display.
+
+    Returns a list of recent events including:
+    - queued: Flow added to queue
+    - executing: Flow starting execution
+    - completed: Flow finished successfully
+    - failed: Flow execution failed
+    - deferred: Flow deferred due to locked device
+    - skipped: Flow skipped (already queued)
+    - unlock_attempt: Device unlock attempted
+    - unlock_success: Device unlocked successfully
+    - unlock_failed: Device unlock failed
+    """
+    deps = get_deps()
+    try:
+        if not hasattr(deps, "flow_scheduler") or not deps.flow_scheduler:
+            return {"activity": [], "message": "Scheduler not initialized"}
+
+        activity = deps.flow_scheduler.get_activity_log(limit)
+        return {
+            "activity": activity,
+            "count": len(activity),
+            "scheduler_running": deps.flow_scheduler.is_running,
+            "scheduler_paused": deps.flow_scheduler.is_paused
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to get scheduler activity: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduler/queue-details")
+async def get_queue_details():
+    """
+    Get detailed queue information for all devices.
+
+    Returns actual flow IDs in queue (not just counts).
+    """
+    deps = get_deps()
+    try:
+        if not hasattr(deps, "flow_scheduler") or not deps.flow_scheduler:
+            return {"queues": {}}
+
+        scheduler = deps.flow_scheduler
+        queues = {}
+
+        for device_id in scheduler._queued_flow_ids:
+            flow_ids = list(scheduler._queued_flow_ids.get(device_id, set()))
+            queue_depth = scheduler._queue_depths.get(device_id, 0)
+
+            # Get flow names for better UI display
+            flows_info = []
+            for flow_id in flow_ids:
+                flow = scheduler.flow_manager.get_flow(device_id, flow_id)
+                if flow:
+                    flows_info.append({
+                        "flow_id": flow_id,
+                        "name": flow.name,
+                        "update_interval": flow.update_interval_seconds
+                    })
+                else:
+                    flows_info.append({"flow_id": flow_id, "name": flow_id})
+
+            last_exec = scheduler._last_execution.get(device_id)
+            queues[device_id] = {
+                "queue_depth": queue_depth,
+                "queued_flows": flows_info,
+                "last_execution": last_exec.isoformat() if last_exec else None,
+                "total_executions": scheduler._total_executions.get(device_id, 0)
+            }
+
+        return {"queues": queues}
+    except Exception as e:
+        logger.error(f"[API] Failed to get queue details: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1442,47 +1690,3 @@ async def save_smart_flow(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# =============================================================================
-# BUNDLED APP FLOWS (Pre-made flows for popular apps)
-# =============================================================================
-
-
-@router.get("/app-flows")
-async def get_bundled_flows():
-    """
-    Get list of available pre-made flows for popular apps.
-
-    Returns:
-        List of apps with available flow templates
-    """
-    # TODO: Load bundled flows from config/flow_templates/bundled/
-    # For now, return empty list as feature is not yet implemented
-    return {
-        "apps": [],
-        "message": "Bundled app flows coming soon. Use Smart Flow or Flow Wizard to create custom flows.",
-    }
-
-
-@router.post("/app-flows/{bundle_id}/install")
-async def install_bundled_flow(
-    bundle_id: str, request: dict, service: FlowService = Depends(get_flow_service)
-):
-    """
-    Install a bundled flow for a specific device.
-
-    Args:
-        bundle_id: ID of the bundled flow template
-        request: { device_id: str }
-
-    Returns:
-        Installed flow
-    """
-    device_id = request.get("device_id")
-    if not device_id:
-        raise HTTPException(status_code=400, detail="device_id required")
-
-    # TODO: Implement bundled flow installation
-    raise HTTPException(
-        status_code=404,
-        detail=f"Bundled flow '{bundle_id}' not found. This feature is coming soon.",
-    )

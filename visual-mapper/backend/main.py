@@ -45,7 +45,7 @@ from utils.action_models import (
 )
 from utils.error_handler import handle_api_error
 from utils.device_migrator import DeviceMigrator
-from utils.connection_monitor import ConnectionMonitor
+from services.connection_monitor import ConnectionMonitor
 from utils.device_security import DeviceSecurityManager
 
 # Phase 8: Flow System
@@ -245,8 +245,8 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 logger.info(f"[Server] Data directory: {DATA_DIR.absolute()}")
 
-# Initialize ADB Bridge
-adb_bridge = ADBBridge()
+# Initialize ADB Bridge (with data_dir for security config lookup)
+adb_bridge = ADBBridge(data_dir=str(DATA_DIR))
 
 # Initialize Device Migrator (handles IP/port changes)
 device_migrator = DeviceMigrator(data_dir=str(DATA_DIR), config_dir=str(DATA_DIR))
@@ -285,6 +285,9 @@ stream_manager: Optional["StreamManager"] = None
 adb_maintenance: Optional["ADBMaintenance"] = None
 shell_pool: Optional["PersistentShellPool"] = None
 connection_monitor: Optional["ConnectionMonitor"] = None
+
+# Track background tasks for graceful shutdown
+_background_tasks: list = []
 
 # MQTT Configuration (loaded from environment or config)
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
@@ -826,7 +829,7 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"[Server] Auto-reconnect failed: {e}")
 
-        asyncio.create_task(auto_reconnect_devices())
+        _background_tasks.append(asyncio.create_task(auto_reconnect_devices()))
 
         # Start connection monitor
         async def start_connection_monitor():
@@ -837,7 +840,7 @@ async def lifespan(app: FastAPI):
                 "[Server] ✅ Connection Monitor started - will check device health every 30s"
             )
 
-        asyncio.create_task(start_connection_monitor())
+        _background_tasks.append(asyncio.create_task(start_connection_monitor()))
 
         # Background task to publish discovery for already-connected devices
         async def publish_existing_devices():
@@ -903,7 +906,7 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"[Server] Failed to publish delayed discoveries: {e}")
 
-        asyncio.create_task(publish_existing_devices())
+        _background_tasks.append(asyncio.create_task(publish_existing_devices()))
 
         # Register action command callback to handle MQTT button presses from HA
         async def on_action_command(device_id: str, action_id: str):
@@ -979,6 +982,7 @@ async def lifespan(app: FastAPI):
     if ml_training_mode == "local":
         try:
             from ml_components.ml_training_server import MLTrainingServer
+            import routes.services as services_module
 
             ml_server = MLTrainingServer(
                 broker=MQTT_BROKER,
@@ -992,6 +996,11 @@ async def lifespan(app: FastAPI):
 
             ml_training_thread = threading.Thread(target=ml_server.start, daemon=True)
             ml_training_thread.start()
+
+            # Store references so status check can detect running server
+            services_module.ml_training_thread = ml_training_thread
+            services_module.ml_training_instance = ml_server
+
             logger.info("[Server] ✅ ML Training Server started (local mode)")
         except ImportError as e:
             logger.warning(f"[Server] ⚠️ ML Training dependencies not available: {e}")
@@ -1013,6 +1022,17 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("[Server] Shutting down Visual Mapper...")
+
+    # Cancel background tasks
+    for task in _background_tasks:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    _background_tasks.clear()
+    logger.info("[Server] Background tasks cancelled")
 
     # Stop all sensor updates
     if sensor_updater:
@@ -1256,7 +1276,8 @@ async def websocket_logs(websocket: WebSocket):
                 # Send keepalive ping
                 try:
                     await websocket.send_json({"type": "ping"})
-                except:
+                except Exception as e:
+                    logger.debug(f"[WS-Logs] Keepalive ping failed, closing: {e}")
                     break
 
     except WebSocketDisconnect:
@@ -1338,4 +1359,6 @@ if __name__ == "__main__":
         f"HTML Cache: {'DISABLED (development mode)' if DISABLE_HTML_CACHE else 'ENABLED (production mode)'}"
     )
 
+    # Just use simple uvicorn.run() - it handles SO_REUSEADDR internally
+    # The port binding happens early in uvicorn startup, before lifespan
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

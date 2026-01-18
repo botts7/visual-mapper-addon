@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="version" content="0.3.4" data-build="dynamic">
+    <meta name="version" content="0.4.0-beta.3.65" data-build="dynamic">
     <title>Flow Management - Visual Mapper</title>
     <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -12,8 +12,8 @@
     <script>
         const cacheKey = sessionStorage.getItem('vmCacheKey') || Date.now();
         sessionStorage.setItem('vmCacheKey', cacheKey);
-        document.write('<link rel="stylesheet" href="css/styles.css?v=0.3.4">');
-        document.write('<link rel="stylesheet" href="css/flows.css?v=0.3.4">');
+        document.write('<link rel="stylesheet" href="css/styles.css?v=0.4.0-beta.3.65">');
+        document.write('<link rel="stylesheet" href="css/flows.css?v=0.4.0-beta.3.65">');
     </script>
     <noscript>
         <link rel="stylesheet" href="css/styles.css">
@@ -36,7 +36,7 @@
 <body>
     <!-- Navbar injected by js/components/navbar.js -->
     <nav></nav>
-    <script type="module" src="js/init.js?v=0.3.4"></script>
+    <script type="module" src="js/init.js?v=0.4.0-beta.3.65"></script>
 
     <div class="flow-container">
         <div class="flow-header">
@@ -110,6 +110,18 @@
             <div class="device-queue-grid" id="deviceQueueGrid">
                 <!-- Device queue cards will be rendered here -->
             </div>
+
+            <!-- Activity Log Panel -->
+            <details class="activity-log-panel" id="activityLogPanel" style="margin-top: 15px;">
+                <summary style="cursor: pointer; font-weight: 600; padding: 8px 0;">
+                    📋 Activity Log <span id="activityLogCount" style="color: var(--text-secondary); font-weight: normal;"></span>
+                </summary>
+                <div class="activity-log-container" id="activityLogContainer" style="max-height: 300px; overflow-y: auto; margin-top: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary);">
+                    <div id="activityLogList" style="padding: 8px;">
+                        <p style="color: var(--text-secondary); text-align: center; padding: 20px;">Loading activity...</p>
+                    </div>
+                </div>
+            </details>
         </div>
 
         <!-- Alerts Panel -->
@@ -139,6 +151,39 @@
                 </a>
             </div>
         </div>
+
+        <!-- Execution Options Panel (v0.4.0-beta.3.65) -->
+        <details class="execution-options-panel" id="executionOptionsPanel" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+            <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">
+                Execution Options
+                <span id="activeModesIndicator" style="font-weight: normal; color: var(--text-secondary); margin-left: 8px;"></span>
+            </summary>
+            <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 16px;">
+                <label class="execution-mode-option" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="execForceExecute">
+                    <span><strong>Force Execute</strong> - Run all steps (ignore sensor timers)</span>
+                </label>
+                <label class="execution-mode-option" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="execStrictMode">
+                    <span><strong>Strict Mode</strong> - Fail if navigation doesn't work</span>
+                </label>
+                <label class="execution-mode-option" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="execRepairMode">
+                    <span><strong>Repair Mode</strong> - Auto-fix element bounds drift</span>
+                </label>
+                <label class="execution-mode-option" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="execLearnMode">
+                    <span><strong>Learn Mode</strong> - Capture UI elements for improvement</span>
+                </label>
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: var(--text-secondary);">
+                <strong>Presets:</strong>
+                <button class="btn btn-sm" onclick="setExecutionPreset('production')" style="margin-left: 8px; padding: 2px 8px;">Production</button>
+                <button class="btn btn-sm" onclick="setExecutionPreset('test')" style="margin-left: 4px; padding: 2px 8px;">Manual Test</button>
+                <button class="btn btn-sm" onclick="setExecutionPreset('debug')" style="margin-left: 4px; padding: 2px 8px;">Debug</button>
+                <button class="btn btn-sm" onclick="setExecutionPreset('none')" style="margin-left: 4px; padding: 2px 8px;">None</button>
+            </div>
+        </details>
 
         <div class="flow-filters">
             <select id="flowDeviceFilter">
@@ -815,7 +860,7 @@
                 updateFlowFilters();
                 renderFlowTable();
                 updateStats();
-                updateDisconnectedAlert(); // Show alert if devices are disconnected
+                await loadExecutionIssues(); // Load execution issues (also updates disconnected alert)
                 await loadAlerts(); // Load alerts after flows
                 await loadSchedulerStatus(); // Load scheduler status
                 await loadFlowExecutionStatuses(); // Load execution history for each flow
@@ -867,6 +912,12 @@
             }
 
             const { success, error, started_at, duration_ms, executed_steps, total_steps } = executionData;
+
+            // Check if flow has never been executed (success is null/undefined)
+            if (success === null || success === undefined) {
+                statusCell.innerHTML = '<span class="status-none" title="Never executed">—</span>';
+                return;
+            }
 
             // Format timestamp
             const timeAgo = formatTimeAgo(started_at);
@@ -1024,6 +1075,9 @@
                 const status = data.status;
 
                 renderSchedulerStatus(status);
+
+                // Also load activity log
+                loadActivityLog();
             } catch (error) {
                 console.error('Failed to load scheduler status:', error);
                 const deviceGrid = document.getElementById('deviceQueueGrid');
@@ -1034,6 +1088,209 @@
                         </p>
                     `;
                 }
+            }
+        }
+
+        async function loadActivityLog() {
+            try {
+                const response = await fetch(`${window.flowManager.apiBase}/scheduler/activity?limit=30`);
+                if (!response.ok) throw new Error('Failed to fetch activity log');
+
+                const data = await response.json();
+                renderActivityLog(data.activity || []);
+            } catch (error) {
+                console.error('Failed to load activity log:', error);
+                const logList = document.getElementById('activityLogList');
+                if (logList) {
+                    logList.innerHTML = `<p style="color: var(--text-secondary); text-align: center; padding: 20px;">Unable to load activity</p>`;
+                }
+            }
+        }
+
+        function renderActivityLog(activities) {
+            const logList = document.getElementById('activityLogList');
+            const logCount = document.getElementById('activityLogCount');
+            if (!logList) return;
+
+            if (logCount) {
+                logCount.textContent = activities.length > 0 ? `(${activities.length} recent)` : '';
+            }
+
+            if (activities.length === 0) {
+                logList.innerHTML = `<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent activity</p>`;
+                return;
+            }
+
+            // Reverse to show most recent first
+            const reversed = [...activities].reverse();
+
+            const icons = {
+                'queued': '📥',
+                'executing': '▶️',
+                'completed': '✅',
+                'failed': '❌',
+                'deferred': '⏸️',
+                'skipped': '⏭️',
+                'unlock_attempt': '🔓',
+                'unlock_success': '🔓',
+                'unlock_failed': '🔒',
+                'unlock_debounced': '⏳'
+            };
+
+            const colors = {
+                'queued': '#2196F3',
+                'executing': '#FF9800',
+                'completed': '#4CAF50',
+                'failed': '#F44336',
+                'deferred': '#9E9E9E',
+                'skipped': '#9E9E9E',
+                'unlock_attempt': '#FF9800',
+                'unlock_success': '#4CAF50',
+                'unlock_failed': '#F44336',
+                'unlock_debounced': '#9E9E9E'
+            };
+
+            logList.innerHTML = reversed.map(entry => {
+                const icon = icons[entry.event_type] || '📋';
+                const color = colors[entry.event_type] || 'var(--text-secondary)';
+                const time = new Date(entry.timestamp).toLocaleTimeString();
+                const flowName = entry.flow_id ? `<strong>${entry.flow_id}</strong>: ` : '';
+
+                return `
+                    <div style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 13px; display: flex; gap: 8px; align-items: flex-start;">
+                        <span style="flex-shrink: 0;">${icon}</span>
+                        <span style="color: var(--text-secondary); flex-shrink: 0; font-size: 12px;">${time}</span>
+                        <span style="color: ${color}; flex: 1;">${flowName}${escapeHtml(entry.message || entry.event_type)}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Store execution status for each flow
+        let flowExecutionIssues = {};
+
+        async function loadExecutionIssues() {
+            try {
+                const response = await fetch(`${window.flowManager.apiBase}/scheduler/execution-status`);
+                if (!response.ok) throw new Error('Failed to fetch execution status');
+
+                const data = await response.json();
+
+                // Store issues by flow_id
+                flowExecutionIssues = {};
+                for (const flow of data.flows || []) {
+                    if (flow.issues && flow.issues.length > 0) {
+                        flowExecutionIssues[flow.flow_id] = flow.issues;
+                    }
+                }
+
+                // Update the disconnected alert with better info
+                updateDisconnectedAlertWithIssues(data);
+
+                // Update flow table issue indicators
+                updateFlowIssueIndicators();
+
+                console.log(`[Flows] Loaded execution issues for ${Object.keys(flowExecutionIssues).length} flows`);
+            } catch (error) {
+                console.warn('[Flows] Could not load execution issues:', error);
+            }
+        }
+
+        function updateDisconnectedAlertWithIssues(data) {
+            const alert = document.getElementById('disconnectedAlert');
+            const disconnectedList = document.getElementById('disconnectedDevicesList');
+
+            // Collect all unique issues
+            const deviceIssues = new Map(); // device_id -> issues
+            for (const flow of data.flows || []) {
+                for (const issue of flow.issues || []) {
+                    if (issue.type === 'device_disconnected') {
+                        if (!deviceIssues.has(flow.device_id)) {
+                            deviceIssues.set(flow.device_id, {
+                                flows: [],
+                                stable_id: flow.stable_device_id
+                            });
+                        }
+                        deviceIssues.get(flow.device_id).flows.push(flow.name);
+                    }
+                }
+            }
+
+            if (deviceIssues.size === 0) {
+                alert.style.display = 'none';
+                return;
+            }
+
+            alert.style.display = 'block';
+
+            // Build list
+            let html = '';
+            for (const [deviceId, info] of deviceIssues) {
+                const identityInfo = deviceIdentityMap[deviceId] || {};
+                const model = identityInfo.model || deviceId;
+                const lastConnection = identityInfo.current_connection || deviceId;
+                const hasReconnectable = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$/.test(lastConnection);
+
+                html += `
+                    <div style="display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 8px; background: var(--background-color); border-radius: 4px; flex-wrap: wrap;">
+                        <span style="font-size: 13px;"><strong>${escapeHtml(model)}</strong></span>
+                        <span style="color: var(--text-secondary); font-size: 12px;">(${info.flows.length} flow${info.flows.length > 1 ? 's' : ''} affected)</span>
+                        ${hasReconnectable ? `
+                            <button onclick="window.reconnectDevice('${lastConnection}')" class="btn btn-sm" style="padding: 2px 8px; font-size: 11px; background: #4CAF50; margin-left: auto;">
+                                Reconnect
+                            </button>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // Add scheduler issues
+            if (data.scheduler_paused) {
+                html += `
+                    <div style="display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 8px; background: #ff980010; border: 1px solid #FF9800; border-radius: 4px;">
+                        <span style="font-size: 16px;">⏸️</span>
+                        <span style="font-size: 13px;"><strong>Scheduler is paused</strong> - flows will not execute automatically</span>
+                        <button onclick="resumeScheduler()" class="btn btn-sm" style="padding: 2px 8px; font-size: 11px; background: #4CAF50; margin-left: auto;">
+                            Resume
+                        </button>
+                    </div>
+                `;
+            }
+
+            disconnectedList.innerHTML = html;
+        }
+
+        function updateFlowIssueIndicators() {
+            // Add issue indicators to flow status cells
+            for (const [flowId, issues] of Object.entries(flowExecutionIssues)) {
+                const safeFlowId = flowId.replace(/[^a-zA-Z0-9]/g, '_');
+                const statusCell = document.getElementById(`last-run-status-${safeFlowId}`);
+
+                if (statusCell && issues.length > 0) {
+                    const issueMessages = issues.map(i => i.message).join('\n');
+                    const issueIcon = getIssueIcon(issues[0].type);
+
+                    // Add issue indicator if not already present
+                    if (!statusCell.querySelector('.issue-indicator')) {
+                        const indicator = document.createElement('span');
+                        indicator.className = 'issue-indicator';
+                        indicator.style.cssText = 'margin-left: 8px; cursor: help;';
+                        indicator.title = issueMessages;
+                        indicator.innerHTML = issueIcon;
+                        statusCell.appendChild(indicator);
+                    }
+                }
+            }
+        }
+
+        function getIssueIcon(issueType) {
+            switch (issueType) {
+                case 'device_disconnected': return '🔌';
+                case 'scheduler_paused': return '⏸️';
+                case 'scheduler_stopped': return '🛑';
+                case 'disabled': return '⏹️';
+                case 'overdue': return '⏰';
+                default: return '⚠️';
             }
         }
 
@@ -1541,10 +1798,31 @@
                     executeBtn.innerHTML = '⏳';
                 }
 
-                showToast('Flow execution started...', 'info');
+                // Get execution mode options
+                const forceExecute = document.getElementById('execForceExecute')?.checked || false;
+                const strictMode = document.getElementById('execStrictMode')?.checked || false;
+                const repairMode = document.getElementById('execRepairMode')?.checked || false;
+                const learnMode = document.getElementById('execLearnMode')?.checked || false;
+
+                // Build query params
+                const params = new URLSearchParams();
+                if (forceExecute) params.append('force_execute', 'true');
+                if (strictMode) params.append('strict_mode', 'true');
+                if (repairMode) params.append('repair_mode', 'true');
+                if (learnMode) params.append('learn_mode', 'true');
+
+                const queryStr = params.toString() ? `?${params.toString()}` : '';
+                const modes = [];
+                if (forceExecute) modes.push('Force');
+                if (strictMode) modes.push('Strict');
+                if (repairMode) modes.push('Repair');
+                if (learnMode) modes.push('Learn');
+
+                const modeInfo = modes.length > 0 ? ` [${modes.join(', ')}]` : '';
+                showToast(`Flow execution started...${modeInfo}`, 'info');
 
                 // Execute the flow via API and get execution result
-                const response = await fetch(`${window.flowManager.apiBase}/flows/${deviceId}/${flowId}/execute`, {
+                const response = await fetch(`${window.flowManager.apiBase}/flows/${deviceId}/${flowId}/execute${queryStr}`, {
                     method: 'POST'
                 });
 
@@ -2617,11 +2895,75 @@
             }
         });
 
+        // Execution mode preset functions (v0.4.0-beta.3.65)
+        function setExecutionPreset(preset) {
+            const forceEl = document.getElementById('execForceExecute');
+            const strictEl = document.getElementById('execStrictMode');
+            const repairEl = document.getElementById('execRepairMode');
+            const learnEl = document.getElementById('execLearnMode');
+
+            switch (preset) {
+                case 'production':
+                    // Auto-fix drift silently
+                    forceEl.checked = false;
+                    strictEl.checked = false;
+                    repairEl.checked = true;
+                    learnEl.checked = false;
+                    break;
+                case 'test':
+                    // Manual testing: run all steps, fail on errors, learn
+                    forceEl.checked = true;
+                    strictEl.checked = true;
+                    repairEl.checked = false;
+                    learnEl.checked = true;
+                    break;
+                case 'debug':
+                    // Full debugging: all options enabled
+                    forceEl.checked = true;
+                    strictEl.checked = true;
+                    repairEl.checked = true;
+                    learnEl.checked = true;
+                    break;
+                case 'none':
+                default:
+                    forceEl.checked = false;
+                    strictEl.checked = false;
+                    repairEl.checked = false;
+                    learnEl.checked = false;
+                    break;
+            }
+            updateExecutionModeIndicator();
+        }
+
+        function updateExecutionModeIndicator() {
+            const modes = [];
+            if (document.getElementById('execForceExecute')?.checked) modes.push('Force');
+            if (document.getElementById('execStrictMode')?.checked) modes.push('Strict');
+            if (document.getElementById('execRepairMode')?.checked) modes.push('Repair');
+            if (document.getElementById('execLearnMode')?.checked) modes.push('Learn');
+
+            const indicator = document.getElementById('activeModesIndicator');
+            if (indicator) {
+                indicator.textContent = modes.length > 0 ? `(Active: ${modes.join(', ')})` : '(Default)';
+            }
+        }
+
+        // Add change listeners for mode checkboxes
+        document.addEventListener('DOMContentLoaded', () => {
+            ['execForceExecute', 'execStrictMode', 'execRepairMode', 'execLearnMode'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', updateExecutionModeIndicator);
+            });
+            updateExecutionModeIndicator();
+        });
+
         // Make functions globally available
         window.loadFlows = loadFlows;
         window.loadAlerts = loadAlerts;
         window.clearAllAlerts = clearAllAlerts;
         window.dismissAlert = dismissAlert;
+        window.setExecutionPreset = setExecutionPreset;
+        window.updateExecutionModeIndicator = updateExecutionModeIndicator;
         window.executeFlow = executeFlow;
         window.testFlow = testFlow;
         window.testCurrentFlow = testCurrentFlow;

@@ -568,6 +568,9 @@ class FlowService:
         flow_id: str,
         execution_method: str = "auto",
         learn_mode: bool = False,
+        strict_mode: bool = False,
+        repair_mode: bool = False,
+        force_execute: bool = False,
     ) -> Dict[str, Any]:
         """
         Phase 2: Execute a flow with proper execution routing.
@@ -587,7 +590,10 @@ class FlowService:
             device_id: Device identifier
             flow_id: Flow identifier
             execution_method: Execution routing method
-            learn_mode: If True, capture UI elements at each screen to improve navigation graph
+            learn_mode: Capture UI elements at each screen for navigation improvement
+            strict_mode: Fail on navigation errors instead of continuing
+            repair_mode: Auto-fix element bounds when drift detected
+            force_execute: Run ALL steps, ignoring sensor intervals
         """
         if not self.flow_executor:
             raise HTTPException(status_code=503, detail="Flow executor not initialized")
@@ -627,10 +633,35 @@ class FlowService:
         if actual_method == "android":
             result = await self._execute_via_mqtt(flow)
         else:
-            # For server execution, ensure device is unlocked first (like scheduler does)
-            await self._auto_unlock_if_needed(flow.device_id)
+            # For server execution, ensure device is unlocked first
+            # Use unified unlock method from FlowExecutor (has retry logic and debounce)
+            unlock_result = await self.flow_executor.auto_unlock_if_needed(flow.device_id)
+            if not unlock_result.get("success", False):
+                # Device is locked and couldn't be unlocked - return error to user
+                from core.flows import FlowExecutionResult
+                error_msg = unlock_result.get("error", "Device is locked and could not be unlocked")
+                logger.warning(f"[FlowService] Flow {flow_id} blocked: {error_msg}")
+                return {
+                    "flow_id": flow_id,
+                    "success": False,
+                    "executed_steps": 0,
+                    "failed_step": None,
+                    "error_message": error_msg,
+                    "captured_sensors": {},
+                    "step_results": [],
+                    "execution_time_ms": 0,
+                    "timestamp": None,
+                    "android_active": android_active,
+                    "execution_method": actual_method,
+                }
             # Default to server execution via ADB
-            result = await self.flow_executor.execute_flow(flow, learn_mode=learn_mode)
+            result = await self.flow_executor.execute_flow(
+                flow,
+                learn_mode=learn_mode,
+                strict_mode=strict_mode,
+                repair_mode=repair_mode,
+                force_execute=force_execute,
+            )
 
         # Convert to dict
         response = {
@@ -648,6 +679,16 @@ class FlowService:
             "android_active": android_active,
             "execution_method": actual_method,
         }
+
+        # Add enhanced tracking fields (v0.4.0-beta.3.21)
+        if hasattr(result, "navigation_failures") and result.navigation_failures:
+            response["navigation_failures"] = result.navigation_failures
+
+        if hasattr(result, "bounds_repaired") and result.bounds_repaired:
+            response["bounds_repaired"] = result.bounds_repaired
+
+        if hasattr(result, "partial_success"):
+            response["partial_success"] = result.partial_success
 
         # Add learning stats if learn_mode was enabled
         if learn_mode and hasattr(result, "learned_screens"):
@@ -677,124 +718,6 @@ class FlowService:
         # Check preferred executor
         preferred = getattr(flow, "preferred_executor", "server")
         return preferred if preferred else "server"
-
-    async def _auto_unlock_if_needed(self, device_id: str) -> bool:
-        """
-        Ensure device is unlocked before flow execution.
-
-        Always tries swipe-to-unlock if device is locked.
-        Uses PIN/passcode if AUTO_UNLOCK strategy is configured.
-
-        Returns True if device is ready (unlocked or successfully unlocked).
-        Returns False if device is locked and couldn't be unlocked.
-        """
-        from utils.device_security import DeviceSecurityManager, LockStrategy
-        from pathlib import Path
-        import os
-
-        # Use same DATA_DIR as main.py
-        data_dir = Path(os.getenv("DATA_DIR", "./data"))
-        security_manager = DeviceSecurityManager(data_dir=str(data_dir))
-
-        # STEP 1: Check if device is locked (do this FIRST, before config check)
-        try:
-            is_locked = await self.adb_bridge.is_locked(device_id)
-            if not is_locked:
-                logger.debug(f"[FlowService] Device {device_id} already unlocked")
-                return True
-        except Exception as e:
-            logger.warning(f"[FlowService] Could not check lock status: {e}")
-            return True  # Continue anyway
-
-        logger.info(f"[FlowService] Device {device_id} is LOCKED - attempting unlock")
-
-        # STEP 2: Check security config
-        security_config = security_manager.get_lock_config(device_id)
-
-        # Also try stable_device_id if available
-        if not security_config:
-            try:
-                stable_id = await self.adb_bridge.get_stable_device_id(device_id)
-                if stable_id and stable_id != device_id:
-                    security_config = security_manager.get_lock_config(stable_id)
-                    if security_config:
-                        logger.debug(
-                            f"[FlowService] Found security config via stable_device_id: {stable_id}"
-                        )
-            except Exception as e:
-                logger.debug(f"[FlowService] Could not get stable_device_id: {e}")
-
-        has_auto_unlock = (
-            security_config
-            and security_config.get("strategy") == LockStrategy.AUTO_UNLOCK.value
-        )
-
-        # DEBUG: Log security config status
-        if security_config:
-            logger.info(
-                f"[FlowService] Security config found: strategy={security_config.get('strategy')}, has_auto_unlock={has_auto_unlock}"
-            )
-        else:
-            logger.warning(
-                f"[FlowService] No security config found for device {device_id}"
-            )
-
-        # STEP 3: Try swipe-to-unlock first (works for no-PIN devices)
-        try:
-            logger.info(f"[FlowService] Calling unlock_screen for {device_id}")
-            await self.adb_bridge.unlock_screen(device_id)
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.warning(f"[FlowService] Swipe unlock failed: {e}")
-
-        # Check if unlocked after swipe
-        is_locked = await self.adb_bridge.is_locked(device_id)
-        if not is_locked:
-            logger.info(f"[FlowService] Device unlocked via swipe")
-            return True
-
-        # STEP 4: Try PIN/passcode (only if AUTO_UNLOCK configured)
-        if has_auto_unlock:
-            passcode = security_manager.get_passcode(device_id)
-            # Also try stable_device_id for passcode
-            if not passcode:
-                try:
-                    stable_id = await self.adb_bridge.get_stable_device_id(device_id)
-                    if stable_id and stable_id != device_id:
-                        passcode = security_manager.get_passcode(stable_id)
-                except:
-                    pass
-        else:
-            passcode = None
-            logger.debug(f"[FlowService] No AUTO_UNLOCK config - skipping PIN attempt")
-
-        if passcode:
-            logger.info(
-                f"[FlowService] Found passcode, attempting PIN unlock for {device_id}"
-            )
-            try:
-                unlock_success = await self.adb_bridge.unlock_device(
-                    device_id, passcode
-                )
-                if unlock_success:
-                    logger.info(f"[FlowService] Device unlocked with passcode")
-                    return True
-                else:
-                    logger.warning(f"[FlowService] unlock_device returned False")
-            except Exception as e:
-                logger.error(f"[FlowService] Passcode unlock error: {e}")
-        else:
-            logger.warning(
-                f"[FlowService] No passcode found for {device_id} (has_auto_unlock={has_auto_unlock})"
-            )
-
-        # Final check
-        is_locked = await self.adb_bridge.is_locked(device_id)
-        if is_locked:
-            logger.error(f"[FlowService] Failed to unlock device {device_id}")
-            return False
-
-        return True
 
     async def _execute_via_mqtt(self, flow) -> "FlowExecutionResult":
         """

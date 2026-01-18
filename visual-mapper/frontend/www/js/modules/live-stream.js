@@ -1,6 +1,6 @@
 /**
  * Visual Mapper - Live Stream Module
- * Version: 0.0.36 (improved smart refresh - better hash, more debug logging)
+ * Version: 0.0.37 (onDimensionsChange callback for orientation handling)
  *
  * WebSocket-based live screenshot streaming with UI element overlays.
  * Supports two modes:
@@ -81,6 +81,7 @@ class LiveStream {
         this.onConnectionStateChange = null; // New callback for connection state
         this.onScreenChange = null;          // Smart refresh: fires when screen stabilizes after change
         this.onElementsCleared = null;       // Fires immediately when screen change detected (before stabilization)
+        this.onDimensionsChange = null;      // Fires when canvas dimensions change (orientation change)
 
         // Overlay settings
         this.showOverlays = true;
@@ -91,15 +92,19 @@ class LiveStream {
         this.hideDividers = true;        // Hide horizontal line dividers
         this.showClickable = true;       // Show clickable elements
         this.showNonClickable = false;   // Show non-clickable elements
+        this.displayMode = 'all';        // 'all', 'hoverOnly', 'topLayer'
+        this.hoveredElement = null;      // Currently hovered element (for hoverOnly mode)
 
         // Element staleness tracking - hide elements when screen content has changed significantly
         this.elementsTimestamp = 0;      // When elements were last fetched
-        this.autoHideStaleElements = false; // DISABLED by default - too sensitive to compression artifacts
+        this.autoHideStaleElements = false; // DISABLED by default - but smartRefreshEnabled handles this
         this.smartRefreshEnabled = true;  // Smart refresh: detect screen changes and fire onScreenChange callback
         this._lastFrameHash = 0;         // Simple hash of last frame for change detection
         this._screenChanged = false;     // True if screen content changed since last element refresh
-        this._significantChangeThreshold = 3; // Require 3 consecutive different frames to trigger
+        this._differentFrameCount = 0;   // Count of consecutive different frames (filters compression noise)
+        this._stableFrameCount = 0;      // Count of consecutive same frames (confirms stabilization)
         this._lastScreenChangeCallback = 0;  // Rate limiting for screen change callback
+        this._elementsStale = false;     // True when elements should be hidden (screen changed)
 
         // OPTIMIZATION: Cache filtered elements to avoid re-filtering every frame
         this._filteredElements = [];
@@ -788,6 +793,8 @@ class LiveStream {
     _renderFrame(img, elements) {
         // Resize canvas if needed
         if (this.canvas.width !== img.width || this.canvas.height !== img.height) {
+            const oldWidth = this.canvas.width;
+            const oldHeight = this.canvas.height;
             this.canvas.width = img.width;
             this.canvas.height = img.height;
 
@@ -805,6 +812,12 @@ class LiveStream {
                 this.deviceHeight = img.height;
                 console.log(`[LiveStream] Updated device dimensions from frame: ${img.width}x${img.height}`);
             }
+
+            // Fire callback when dimensions change (for orientation handling)
+            if (oldWidth !== 0 && oldHeight !== 0 && this.onDimensionsChange) {
+                console.log(`[LiveStream] Dimensions changed: ${oldWidth}x${oldHeight} -> ${img.width}x${img.height}`);
+                this.onDimensionsChange(img.width, img.height, oldWidth, oldHeight);
+            }
         }
 
         // Detect if screen content has changed (for stale element detection or smart refresh)
@@ -820,20 +833,141 @@ class LiveStream {
         // Draw screenshot
         this.ctx.drawImage(img, 0, 0);
 
-        // Draw overlays (skip if screen has changed since elements were fetched)
-        if (this.showOverlays && elements.length > 0) {
-            // Check if screen has changed since elements were fetched
-            const elementsStale = this.autoHideStaleElements && this.areElementsStale();
+        // Draw overlays based on display mode
+        // DEBUG: Log display mode periodically (every 100 frames)
+        this._frameCount = (this._frameCount || 0) + 1;
+        if (this._frameCount % 100 === 0) {
+            console.log(`[LiveStream] Frame ${this._frameCount}: displayMode=${this.displayMode}, elements=${elements.length}, showOverlays=${this.showOverlays}`);
+        }
 
-            if (!elementsStale) {
-                this._drawElements(elements);
-            } else {
-                // Draw subtle indicator that elements are stale
-                this.ctx.fillStyle = 'rgba(255, 200, 0, 0.8)';
-                this.ctx.font = '12px monospace';
-                this.ctx.fillText('Screen changed - click Refresh Elements', 10, 20);
+        if (this.showOverlays && elements.length > 0) {
+            switch (this.displayMode) {
+                case 'hoverOnly':
+                    // Only draw the currently hovered element - draw directly without filtering
+                    if (this.hoveredElement && this.hoveredElement.bounds) {
+                        this._drawSingleElement(this.hoveredElement);
+                    }
+                    // If not hovering anything, draw nothing (clean view)
+                    break;
+
+                case 'topLayer':
+                    // Only draw elements that are not occluded by other elements
+                    const topLayerElements = this._filterTopLayerElements(elements);
+                    this._drawElements(topLayerElements);
+                    break;
+
+                case 'all':
+                default:
+                    // Draw all elements (original behavior)
+                    this._drawElements(elements);
+                    break;
             }
         }
+    }
+
+    /**
+     * Draw a single element overlay (bypasses filtering for hover-only mode)
+     * @param {Object} el - Element to draw
+     */
+    _drawSingleElement(el) {
+        if (!el.bounds) return;
+
+        // Calculate scale factor
+        const scaleX = this.canvas.width / this.deviceWidth;
+        const scaleY = this.canvas.height / this.deviceHeight;
+
+        // Scale coordinates from device to canvas resolution
+        const x = Math.floor(el.bounds.x * scaleX);
+        const y = Math.floor(el.bounds.y * scaleY);
+        const width = Math.floor(el.bounds.width * scaleX);
+        const height = Math.floor(el.bounds.height * scaleY);
+
+        // Draw bounding box
+        this.ctx.strokeStyle = el.clickable ? '#00ff00' : '#ffff00';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(x, y, width, height);
+
+        // Draw text label
+        if (this.showTextLabels && el.text && el.text.trim()) {
+            this._drawTextLabel(el.text, x, y, width);
+        }
+    }
+
+    /**
+     * Filter elements to only include those in the top layer (not occluded)
+     * An element is considered occluded if a LATER element (higher z-order) significantly overlaps it
+     * @param {Array} elements - All elements
+     * @returns {Array} Elements that appear to be in the top layer
+     */
+    _filterTopLayerElements(elements) {
+        // OPTIMIZATION: Return cached result if elements and filter settings unchanged
+        const currentHash = this._getFilterSettingsHash();
+        if (elements === this._lastTopLayerElementsRef &&
+            currentHash === this._lastTopLayerSettingsHash) {
+            return this._cachedTopLayerElements;
+        }
+
+        const filtered = this._getFilteredElements(elements);
+        if (filtered.length === 0) {
+            this._cacheTopLayerResult(elements, currentHash, filtered);
+            return filtered;
+        }
+
+        // Find all potential overlay elements (elements that might be covering others)
+        // Look for elements in the later part of the array that are reasonably sized
+        const overlayElements = [];
+        for (let i = Math.floor(filtered.length * 0.3); i < filtered.length; i++) {
+            const el = filtered[i];
+            const area = el.bounds.width * el.bounds.height;
+            // Elements larger than 5000 pixels could be overlays (cards, dialogs, etc.)
+            if (area > 5000) {
+                overlayElements.push({ element: el, index: i });
+            }
+        }
+
+        // For each element, check if it's significantly covered by a later element
+        const visibleElements = [];
+        for (let i = 0; i < filtered.length; i++) {
+            const el = filtered[i];
+            let isOccluded = false;
+
+            // Check against each potential overlay that comes AFTER this element
+            for (const overlay of overlayElements) {
+                if (overlay.index <= i) continue; // Only check elements that come later (on top)
+
+                const overlayEl = overlay.element;
+
+                // Calculate overlap between this element and the overlay
+                const overlapX = Math.max(0, Math.min(el.bounds.x + el.bounds.width, overlayEl.bounds.x + overlayEl.bounds.width) - Math.max(el.bounds.x, overlayEl.bounds.x));
+                const overlapY = Math.max(0, Math.min(el.bounds.y + el.bounds.height, overlayEl.bounds.y + overlayEl.bounds.height) - Math.max(el.bounds.y, overlayEl.bounds.y));
+                const overlapArea = overlapX * overlapY;
+
+                const elArea = el.bounds.width * el.bounds.height;
+
+                // If more than 50% of this element is covered by the overlay, consider it occluded
+                if (elArea > 0 && overlapArea / elArea > 0.5) {
+                    isOccluded = true;
+                    break;
+                }
+            }
+
+            if (!isOccluded) {
+                visibleElements.push(el);
+            }
+        }
+
+        this._cacheTopLayerResult(elements, currentHash, visibleElements);
+        return visibleElements;
+    }
+
+    /**
+     * Cache the top layer filtering result
+     * @private
+     */
+    _cacheTopLayerResult(elements, hash, result) {
+        this._lastTopLayerElementsRef = elements;
+        this._lastTopLayerSettingsHash = hash;
+        this._cachedTopLayerElements = result;
     }
 
     /**
@@ -981,6 +1115,28 @@ class LiveStream {
     }
 
     /**
+     * Set overlay display mode
+     * @param {string} mode - 'all', 'hoverOnly', or 'topLayer'
+     */
+    setDisplayMode(mode) {
+        const validModes = ['all', 'hoverOnly', 'topLayer'];
+        if (!validModes.includes(mode)) {
+            console.warn(`[LiveStream] Invalid display mode: ${mode}, defaulting to 'all'`);
+            mode = 'all';
+        }
+        this.displayMode = mode;
+        console.log(`[LiveStream] Display mode set to: ${mode}`);
+    }
+
+    /**
+     * Set currently hovered element (for hoverOnly display mode)
+     * @param {Object|null} element - The element being hovered, or null
+     */
+    setHoveredElement(element) {
+        this.hoveredElement = element;
+    }
+
+    /**
      * Set device dimensions for proper coordinate scaling
      * Call this when device dimensions are known (e.g., from elements API)
      * @param {number} width - Device width in pixels
@@ -1003,8 +1159,21 @@ class LiveStream {
     areElementsStale() {
         // No elements fetched yet
         if (this.elementsTimestamp === 0) return true;
-        // Screen content has changed since elements were fetched
+        // Check if elements were marked stale by screen change detection
+        // _elementsStale is set when screen change is detected and cleared when new elements arrive
+        if (this._elementsStale) return true;
+        // Also check if screen is currently changing (transitional state)
         return this._screenChanged;
+    }
+
+    /**
+     * Mark elements as fresh (call after new elements are fetched)
+     * This clears the stale flag so overlays will be drawn again
+     */
+    markElementsFresh() {
+        this._elementsStale = false;
+        this._elementsStaleTime = 0;
+        this.elementsTimestamp = Date.now();
     }
 
     /**
@@ -1054,24 +1223,26 @@ class LiveStream {
 
             // Compare with previous frame
             if (this._lastFrameHash !== 0 && newHash !== this._lastFrameHash) {
-                // Screen changed - track that we're in a "changing" state
-                if (!this._screenChanged) {
-                    console.log('[LiveStream] Smart: screen change detected, marking elements stale');
-                    // Mark elements as stale - _renderFrame will skip drawing them
-                    // Don't clear immediately to avoid flicker - let refresh replace atomically
+                // Frame is different - could be real change or compression noise
+                this._differentFrameCount = (this._differentFrameCount || 0) + 1;
+                this._stableFrameCount = 0;
+
+                // Only mark as "screen changing" after multiple consecutive different frames
+                // This filters out compression noise (single-frame differences)
+                // CHANGED: Require 2 consecutive different frames before marking elements stale
+                if (this._differentFrameCount >= 2 && !this._screenChanged) {
+                    console.log('[LiveStream] Smart: significant change detected, marking elements stale');
+                    this._screenChanged = true;
                     this._elementsStale = true;
                     this._elementsStaleTime = Date.now();
-                    // Note: We intentionally do NOT clear this.elements here
-                    // The autoHideStaleElements check in _renderFrame handles not drawing stale overlays
-                    // onElementsCleared callback removed - was causing double-clear flicker
                 }
-                this._screenChanged = true;
-                this._stableFrameCount = 0;
             } else {
+                // Frame is same as previous
+                this._differentFrameCount = 0;
                 this._stableFrameCount++;
 
                 // Screen stabilized after a change - fire callback
-                // Wait for 3 consecutive stable frames to avoid false positives from compression
+                // Wait for 3 consecutive stable frames to confirm stabilization
                 if (this._screenChanged && this._stableFrameCount >= 3) {
                     this._screenChanged = false;
 

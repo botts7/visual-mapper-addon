@@ -1,7 +1,8 @@
 /**
  * Flow Wizard Step 3 Module - Recording Mode
- * Visual Mapper v0.0.63
+ * Visual Mapper v0.0.64
  *
+ * v0.0.64: Dynamic orientation handling - onDimensionsChange callback triggers applyZoom and element refresh
  * v0.0.63: Companion app integration for fast UI element fetching
  *          - checkCompanionAppStatus() checks if companion app is available for device
  *          - refreshElements() now uses companion API when available (100-300ms vs 1-3s)
@@ -62,23 +63,28 @@
  * - Visual feedback (ripples, swipe paths)
  */
 
-import { showToast } from './toast.js?v=0.3.4';
-import FlowCanvasRenderer from './flow-canvas-renderer.js?v=0.3.4';
-import FlowInteractions from './flow-interactions.js?v=0.3.4';
-import FlowStepManager from './flow-step-manager.js?v=0.3.4';
-import FlowRecorder from './flow-recorder.js?v=0.3.4';
-import LiveStream from './live-stream.js?v=0.3.4';
-import * as Dialogs from './flow-wizard-dialogs.js?v=0.3.4';
+import { showToast } from './toast.js?v=0.4.0-beta.3.59';
+import FlowCanvasRenderer from './flow-canvas-renderer.js?v=0.4.0-beta.3.59';
+import FlowInteractions from './flow-interactions.js?v=0.4.0-beta.3.59';
+import FlowStepManager from './flow-step-manager.js?v=0.4.0-beta.3.59';
+import FlowRecorder from './flow-recorder.js?v=0.4.0-beta.3.59';
+import LiveStream from './live-stream.js?v=0.4.0-beta.3.59';
+import * as Dialogs from './flow-wizard-dialogs.js?v=0.4.0-beta.3.59';
 import {
     ensureDeviceUnlocked as sharedEnsureUnlocked,
     startKeepAwake as sharedStartKeepAwake,
     stopKeepAwake as sharedStopKeepAwake,
     sendWakeSignal
-} from './device-unlock.js?v=0.3.4';
+} from './device-unlock.js?v=0.4.0-beta.3.59';
 
 // Phase 2 Refactor: Import modularized components
 // These modules were extracted from this file for maintainability
-import * as Step3Controller from './step3-controller.js?v=0.3.4';
+import * as Step3Controller from './step3-controller.js?v=0.4.0-beta.3.59';
+import {
+    drawElementOverlays,
+    drawElementOverlaysScaled,
+    drawTextLabel
+} from './canvas-overlay-renderer.js?v=0.4.0-beta.3.59';
 
 // Helper to get API base (from global set by init.js)
 function getApiBase() {
@@ -1422,6 +1428,47 @@ export function toggleRightPanel(wizard) {
  * Setup overlay filter controls
  */
 export function setupOverlayFilters(wizard) {
+    // Helper to save overlay filters to localStorage
+    const saveOverlayFilters = () => {
+        localStorage.setItem('visualMapper.overlayFilters', JSON.stringify(wizard.overlayFilters));
+    };
+
+    // Helper to apply overlay settings to LiveStream
+    const applyOverlaySettings = () => {
+        if (wizard.liveStream) {
+            wizard.liveStream.setDisplayMode(wizard.overlayFilters.displayMode);
+            wizard.liveStream.setOverlaysVisible(
+                wizard.overlayFilters.showClickable || wizard.overlayFilters.showNonClickable
+            );
+            wizard.liveStream.setShowClickable(wizard.overlayFilters.showClickable);
+            wizard.liveStream.setShowNonClickable(wizard.overlayFilters.showNonClickable);
+            wizard.liveStream.setTextLabelsVisible(wizard.overlayFilters.showTextLabels);
+            wizard.liveStream.setHideContainers(wizard.overlayFilters.hideContainers);
+            wizard.liveStream.setHideEmptyElements(wizard.overlayFilters.hideEmptyElements);
+            wizard.liveStream.setHideSmall(wizard.overlayFilters.hideSmall);
+            wizard.liveStream.setHideDividers(wizard.overlayFilters.hideDividers);
+        }
+    };
+
+    // Setup display mode dropdown
+    const displayModeSelect = document.getElementById('overlayDisplayMode');
+    if (displayModeSelect) {
+        displayModeSelect.value = wizard.overlayFilters.displayMode || 'all';
+        displayModeSelect.addEventListener('change', () => {
+            wizard.overlayFilters.displayMode = displayModeSelect.value;
+            saveOverlayFilters();
+            console.log(`[FlowWizard] Display mode = ${displayModeSelect.value}`);
+            if (wizard.captureMode === 'streaming') {
+                applyOverlaySettings();
+            } else if (wizard.canvasRenderer) {
+                wizard.canvasRenderer.setOverlayFilters(wizard.overlayFilters);
+                if (wizard.recorder?.currentScreenshot) {
+                    wizard.updateScreenshotDisplay();
+                }
+            }
+        });
+    }
+
     const filterIds = {
         showClickable: 'filterClickable',
         showNonClickable: 'filterNonClickable',
@@ -1441,6 +1488,7 @@ export function setupOverlayFilters(wizard) {
 
         checkbox.addEventListener('change', () => {
             wizard.overlayFilters[filterName] = checkbox.checked;
+            saveOverlayFilters(); // Persist to localStorage
             // Update canvas renderer filters
             if (wizard.canvasRenderer) {
                 wizard.canvasRenderer.setOverlayFilters(wizard.overlayFilters);
@@ -1449,26 +1497,14 @@ export function setupOverlayFilters(wizard) {
 
             // Only refresh display in polling mode WITH valid screenshot data
             if (wizard.captureMode === 'streaming') {
-                // Streaming mode: update all LiveStream overlay settings
-                if (wizard.liveStream) {
-                    wizard.liveStream.setOverlaysVisible(
-                        wizard.overlayFilters.showClickable || wizard.overlayFilters.showNonClickable
-                    );
-                    wizard.liveStream.setShowClickable(wizard.overlayFilters.showClickable);
-                    wizard.liveStream.setShowNonClickable(wizard.overlayFilters.showNonClickable);
-                    wizard.liveStream.setTextLabelsVisible(wizard.overlayFilters.showTextLabels);
-                    wizard.liveStream.setHideContainers(wizard.overlayFilters.hideContainers);
-                    wizard.liveStream.setHideEmptyElements(wizard.overlayFilters.hideEmptyElements);
-                    wizard.liveStream.setHideSmall(wizard.overlayFilters.hideSmall);
-                    wizard.liveStream.setHideDividers(wizard.overlayFilters.hideDividers);
-                }
+                applyOverlaySettings();
             } else if (wizard.recorder?.currentScreenshot) {
                 // Polling mode: only redraw if we have valid screenshot data
                 wizard.updateScreenshotDisplay();
             }
         });
 
-        // Set initial state
+        // Set initial state from saved preferences
         checkbox.checked = wizard.overlayFilters[filterName];
     });
 
@@ -1732,14 +1768,18 @@ async function prepareDeviceForStreaming(wizard) {
 
                 // Fetch screenshot to preload (don't wait too long)
                 try {
-                    const screenshotPromise = fetch(`${apiBase}/adb/screenshot`, {
+                    const abortController = new AbortController();
+                    const timeoutId = setTimeout(() => abortController.abort(), 3000);
+
+                    const response = await fetch(`${apiBase}/adb/screenshot`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ device_id: wizard.selectedDevice, quick: false })
+                        body: JSON.stringify({ device_id: wizard.selectedDevice, quick: false }),
+                        signal: abortController.signal
                     });
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject('timeout'), 3000));
 
-                    const response = await Promise.race([screenshotPromise, timeoutPromise]);
+                    clearTimeout(timeoutId);
+
                     if (response && response.ok) {
                         const data = await response.json();
                         if (data.screenshot) {
@@ -1750,7 +1790,11 @@ async function prepareDeviceForStreaming(wizard) {
                         }
                     }
                 } catch (e) {
-                    console.log('[FlowWizard] Screenshot preload skipped:', e);
+                    if (e.name === 'AbortError') {
+                        console.log('[FlowWizard] Screenshot preload timed out');
+                    } else {
+                        console.log('[FlowWizard] Screenshot preload skipped:', e);
+                    }
                 }
 
                 updateStep('step-connect', 'done');
@@ -1983,7 +2027,24 @@ export async function startStreaming(wizard) {
         }
     };
 
-    // Apply current overlay settings
+    // Handle dimension changes (orientation change)
+    wizard.liveStream.onDimensionsChange = (newWidth, newHeight, oldWidth, oldHeight) => {
+        console.log(`[FlowWizard] Dimensions changed: ${oldWidth}x${oldHeight} -> ${newWidth}x${newHeight}`);
+        // Clear old elements when orientation changes - they won't match new layout
+        wizard.liveStream.elements = [];
+        wizard.liveStream.markElementsFresh(); // Clear stale flag
+        // Apply zoom to update CSS dimensions for new aspect ratio
+        if (wizard.canvasRenderer) {
+            requestAnimationFrame(() => {
+                wizard.canvasRenderer.applyZoom();
+            });
+        }
+        // Trigger element refresh after orientation change
+        refreshElements(wizard);
+    };
+
+    // Apply current overlay settings (including display mode from persistent user preferences)
+    wizard.liveStream.setDisplayMode(wizard.overlayFilters.displayMode || 'all');
     wizard.liveStream.setOverlaysVisible(wizard.overlayFilters.showClickable || wizard.overlayFilters.showNonClickable);
     wizard.liveStream.setShowClickable(wizard.overlayFilters.showClickable);
     wizard.liveStream.setShowNonClickable(wizard.overlayFilters.showNonClickable);
@@ -2072,6 +2133,8 @@ export function startElementAutoRefresh(wizard) {
             if (wizard.captureMode === 'streaming' && wizard.liveStream?.connectionState === 'connected') {
                 console.log('[FlowWizard] Smart refresh triggered');
                 refreshElements(wizard);
+                // Track refresh time for static screen optimization
+                wizard._lastElementRefreshTime = performance.now();
             }
         };
         // Note: onElementsCleared callback removed - was causing element flicker
@@ -2395,16 +2458,21 @@ export async function refreshElements(wizard) {
             // and element overlays, so no need to update liveStream separately
         }
 
-        // Only in streaming mode: Update LiveStream elements for overlay (batched - single redraw)
+        // Only in streaming mode: Update LiveStream elements for overlay
         // In polling mode, canvasRenderer.render() already handles this
         if (wizard.captureMode === 'streaming' && wizard.liveStream) {
-            // Set new elements and redraw in one operation (no intermediate states)
+            // Update elements atomically - next WebSocket frame will redraw with new elements
+            // CRITICAL: Do NOT call _renderFrame manually here!
+            // Calling _renderFrame(currentImage) draws the LAST processed frame which may be stale
+            // (showing old screen before the tap). The WebSocket handler will naturally redraw
+            // the current live frame with the new elements on the next frame arrival.
+            // This follows the principle: "video should just be video" - let the stream continue
+            // uninterrupted instead of forcing a redraw with potentially stale cached images.
             wizard.liveStream.elements = elements;
 
-            // Single atomic redraw with new elements
-            if (wizard.liveStream.currentImage) {
-                wizard.liveStream._renderFrame(wizard.liveStream.currentImage, elements);
-            }
+            // Mark elements as fresh so they'll be drawn on the next frame
+            // This clears the _elementsStale flag that was set on screen change detection
+            wizard.liveStream.markElementsFresh();
         }
 
         // Update element tree (deferred to avoid blocking frame rendering)
@@ -2433,7 +2501,11 @@ export async function refreshElements(wizard) {
                         // Extract app name from package (e.g., "com.byd.autolink" → "BYD AUTO")
                         const appName = screenData.activity.package.split('.').pop() || screenData.activity.package;
                         appNameEl.textContent = appName.charAt(0).toUpperCase() + appName.slice(1);
-                        console.log(`[FlowWizard] Updated app name: ${appName}`);
+                        // Throttle this log to reduce spam (only log when app name actually changes)
+                        if (wizard._lastLoggedAppName !== appName) {
+                            wizard._lastLoggedAppName = appName;
+                            console.log(`[FlowWizard] Updated app name: ${appName}`);
+                        }
                     }
                     await updateNavigationContext(wizard, screenData.activity, elements);
                     await maybeLearnScreen(wizard, screenData.activity, elements);
@@ -2443,7 +2515,11 @@ export async function refreshElements(wizard) {
             console.warn('[FlowWizard] Failed to update app info:', appInfoError);
         }
 
-        console.log(`[FlowWizard] Elements refreshed: ${elements.length} elements`);
+        // Throttle this log - only show when element count changes
+        if (wizard._lastLoggedElementCount !== elements.length) {
+            wizard._lastLoggedElementCount = elements.length;
+            console.log(`[FlowWizard] Elements refreshed: ${elements.length} elements`);
+        }
     } catch (error) {
         console.warn('[FlowWizard] Failed to refresh elements:', error);
     } finally {
@@ -2476,6 +2552,18 @@ export async function refreshAfterAction(wizard, delayMs = 500) {
             } else {
                 // Polling mode: capture screenshot which includes elements
                 await wizard.recorder?.captureScreenshot();
+
+                // TIMING FIX: Wait for UI to settle before rendering overlays
+                // Check if UI is still loading/refreshing - if so, wait and retry
+                const MAX_SETTLE_ATTEMPTS = 3;
+                let attempt = 0;
+                while (attempt < MAX_SETTLE_ATTEMPTS && wizard.recorder?.detectLoadingIndicators?.()) {
+                    console.log(`[FlowWizard] UI loading detected, waiting... (${attempt + 1}/${MAX_SETTLE_ATTEMPTS})`);
+                    await new Promise(r => setTimeout(r, 800));
+                    await wizard.recorder?.captureScreenshot();
+                    attempt++;
+                }
+
                 wizard.updateScreenshotDisplay?.();
             }
         } catch (e) {
@@ -2586,6 +2674,9 @@ export function handleCanvasHover(wizard, e, hoverTooltip, container) {
     }
 
     // Prioritize: elements with text first, then clickable, then smallest area
+    // IMPORTANT: elementsAtPoint is built in reverse order, so elements that were
+    // later in the original array (visually on top in Android) are FIRST in this array.
+    // We prefer elements visually on top (like popup elements over background elements).
     let foundElement = null;
     if (elementsAtPoint.length > 0) {
         // Prefer elements with text
@@ -2593,11 +2684,24 @@ export function handleCanvasHover(wizard, e, hoverTooltip, container) {
         const clickable = elementsAtPoint.filter(el => el.clickable);
         const candidates = withText.length > 0 ? withText : (clickable.length > 0 ? clickable : elementsAtPoint);
 
-        foundElement = candidates.reduce((smallest, el) => {
-            const area = el.bounds.width * el.bounds.height;
-            const smallestArea = smallest.bounds.width * smallest.bounds.height;
-            return area < smallestArea ? el : smallest;
-        });
+        // Among candidates, prefer:
+        // 1. First in candidates array (later in original = visually on top)
+        // 2. If similar z-order, prefer smaller elements (more specific targets)
+        // Threshold: if top element is not massively bigger, prefer it for z-order
+        const topElement = candidates[0]; // First candidate = visually on top
+        const topArea = topElement.bounds.width * topElement.bounds.height;
+
+        foundElement = candidates.reduce((best, el, idx) => {
+            const elArea = el.bounds.width * el.bounds.height;
+            const bestArea = best.bounds.width * best.bounds.height;
+
+            // If current element is much smaller (< 30% of best), prefer it
+            // But only if it's not too far down in the z-order (first 3 elements)
+            if (idx < 3 && elArea < bestArea * 0.3) {
+                return el;
+            }
+            return best;
+        }, topElement);
     }
 
     // Check if element changed (compare by bounds, not object reference)
@@ -2609,11 +2713,19 @@ export function handleCanvasHover(wizard, e, hoverTooltip, container) {
     if (foundElement && !isSameElement) {
         // New element - rebuild tooltip content
         wizard.hoveredElement = foundElement;
+        // Update LiveStream's hovered element for hoverOnly display mode
+        if (wizard.liveStream) {
+            wizard.liveStream.setHoveredElement(foundElement);
+        }
         showHoverTooltip(wizard, e, foundElement, hoverTooltip, container);
         highlightHoveredElement(wizard, foundElement);
     } else if (!foundElement && wizard.hoveredElement) {
         // No longer hovering any element
         wizard.hoveredElement = null;
+        // Clear LiveStream's hovered element
+        if (wizard.liveStream) {
+            wizard.liveStream.setHoveredElement(null);
+        }
         hideHoverTooltip(wizard, hoverTooltip);
         clearHoverHighlight(wizard);
     }
@@ -2745,18 +2857,6 @@ export function highlightHoveredElement(wizard, element) {
     const cssScaleX = canvasRect.width / wizard.canvas.width;
     const cssScaleY = canvasRect.height / wizard.canvas.height;
 
-    // DEBUG: Always log scaling info to diagnose misalignment
-    console.log('[HoverHighlight] Scaling:', {
-        mode: wizard.captureMode,
-        canvasBitmap: `${wizard.canvas.width}x${wizard.canvas.height}`,
-        canvasCSS: `${canvasRect.width.toFixed(0)}x${canvasRect.height.toFixed(0)}`,
-        cssScale: `${cssScaleX.toFixed(3)}x${cssScaleY.toFixed(3)}`,
-        offset: `${offsetX.toFixed(0)}x${offsetY.toFixed(0)}`,
-        scroll: `${container.scrollLeft}x${container.scrollTop}`,
-        canvasPos: `(${canvasRect.left.toFixed(0)},${canvasRect.top.toFixed(0)})`,
-        containerPos: `(${containerRect.left.toFixed(0)},${containerRect.top.toFixed(0)})`
-    });
-
     // In streaming mode, element bounds are in device coords, canvas may be at lower res
     // We need to scale: device coords → canvas coords → CSS display coords
     // IMPORTANT: Use separate X and Y scales to handle aspect ratio differences
@@ -2776,13 +2876,6 @@ export function highlightHoveredElement(wizard, element) {
     const y = b.y * totalScaleY + offsetY;
     const w = b.width * totalScaleX;
     const h = b.height * totalScaleY;
-
-    // DEBUG: Log element positioning
-    console.log('[HoverHighlight] Element:', {
-        bounds: `(${b.x},${b.y}) ${b.width}x${b.height}`,
-        scaled: `(${x.toFixed(0)},${y.toFixed(0)}) ${w.toFixed(0)}x${h.toFixed(0)}`,
-        text: element.text?.substring(0, 30) || element.class
-    });
 
     highlight.style.cssText = `
         position: absolute;
@@ -3291,7 +3384,7 @@ export async function handleTreeSensor(wizard, element) {
     };
 
     // Import Dialogs module dynamically
-    const Dialogs = await import('./flow-wizard-dialogs.js?v=0.3.4');
+    const Dialogs = await import('./flow-wizard-dialogs.js?v=0.4.0-beta.3.59');
 
     // Go directly to text sensor creation (most common case from element tree)
     // Use element.index if available (from tree), otherwise default to 0
@@ -3325,7 +3418,7 @@ export async function handleTreeTimestamp(wizard, element) {
     }
 
     // Import Dialogs module dynamically
-    const Dialogs = await import('./flow-wizard-dialogs.js?v=0.3.4');
+    const Dialogs = await import('./flow-wizard-dialogs.js?v=0.4.0-beta.3.59');
 
     // Show configuration dialog
     const config = await Dialogs.promptForTimestampConfig(wizard, element, steps[lastRefreshIndex]);
@@ -3551,7 +3644,7 @@ function clearSuggestionHighlight(wizard) {
 
     import('./canvas-overlay-renderer.js').then(module => {
         module.clearHoverHighlight(wizard);
-    }).catch(() => {});
+    }).catch(err => console.warn('[FlowWizard] Failed to clear hover highlight:', err));
 }
 
 /**
@@ -4742,8 +4835,15 @@ export async function handleRefreshWithRetries(wizard) {
     // Perform multiple refreshes
     for (let i = 0; i < attempts; i++) {
         showToast(`Refresh ${i + 1}/${attempts}...`, 'info', 1000);
-        await wizard.recorder.refresh(false); // Don't add step yet
-        updateScreenshotDisplay(wizard);
+
+        if (wizard.captureMode === 'streaming') {
+            // Streaming mode: just refresh elements (video handles screenshot)
+            await refreshElements(wizard);
+        } else {
+            // Polling mode: capture screenshot and display
+            await wizard.recorder.refresh(false); // Don't add step yet
+            updateScreenshotDisplay(wizard);
+        }
 
         // Wait between attempts (except after the last one)
         if (i < attempts - 1) {
@@ -4770,6 +4870,19 @@ export async function handleRefreshWithRetries(wizard) {
  * Update screenshot display
  */
 export async function updateScreenshotDisplay(wizard) {
+    // In streaming mode, the live stream handles canvas rendering
+    // Don't override with static screenshot
+    if (wizard.captureMode === 'streaming' && wizard.liveStream?.isStreaming) {
+        console.log('[FlowWizard] Skipping updateScreenshotDisplay - live stream is active');
+        // Still update element tree if we have metadata
+        const metadata = wizard.recorder?.screenshotMetadata;
+        if (metadata?.elements?.length > 0) {
+            updateElementTree(wizard, metadata.elements);
+            updateElementCount(wizard, metadata.elements.length);
+        }
+        return;
+    }
+
     const dataUrl = wizard.recorder.getScreenshotDataUrl();
     const metadata = wizard.recorder.screenshotMetadata;
 
@@ -5155,7 +5268,7 @@ export function renderFilteredElements(wizard) {
     panel.querySelectorAll('.btn-tap').forEach(btn => {
         btn.addEventListener('click', async () => {
             const index = parseInt(btn.dataset.index);
-            const ElementActions = await import('./flow-wizard-element-actions.js?v=0.3.4');
+            const ElementActions = await import('./flow-wizard-element-actions.js?v=0.4.0-beta.3.59');
             await ElementActions.addTapStepFromElement(wizard, interactiveElements[index]);
         });
     });
@@ -5163,7 +5276,7 @@ export function renderFilteredElements(wizard) {
     panel.querySelectorAll('.btn-type').forEach(btn => {
         btn.addEventListener('click', async () => {
             const index = parseInt(btn.dataset.index);
-            const ElementActions = await import('./flow-wizard-element-actions.js?v=0.3.4');
+            const ElementActions = await import('./flow-wizard-element-actions.js?v=0.4.0-beta.3.59');
             await ElementActions.addTypeStepFromElement(wizard, interactiveElements[index]);
         });
     });
@@ -5171,7 +5284,7 @@ export function renderFilteredElements(wizard) {
     panel.querySelectorAll('.btn-sensor').forEach(btn => {
         btn.addEventListener('click', async () => {
             const index = parseInt(btn.dataset.index);
-            const ElementActions = await import('./flow-wizard-element-actions.js?v=0.3.4');
+            const ElementActions = await import('./flow-wizard-element-actions.js?v=0.4.0-beta.3.59');
             await ElementActions.addSensorCaptureFromElement(wizard, interactiveElements[index], index);
         });
     });
@@ -5179,178 +5292,10 @@ export function renderFilteredElements(wizard) {
     panel.querySelectorAll('.btn-action').forEach(btn => {
         btn.addEventListener('click', async () => {
             const index = parseInt(btn.dataset.index);
-            const Dialogs = await import('./flow-wizard-dialogs.js?v=0.3.4');
+            const Dialogs = await import('./flow-wizard-dialogs.js?v=0.4.0-beta.3.59');
             await Dialogs.addActionStepFromElement(wizard, interactiveElements[index]);
         });
     });
-}
-
-// ==========================================
-// Drawing Methods
-// ==========================================
-
-/**
- * Draw UI element overlays on canvas
- */
-export function drawElementOverlays(wizard) {
-    if (!wizard.currentImage || !wizard.recorder.screenshotMetadata) {
-        console.warn('[FlowWizard] Cannot draw overlays: no screenshot loaded');
-        return;
-    }
-
-    // Redraw the screenshot image first (to clear old overlays)
-    wizard.ctx.drawImage(wizard.currentImage, 0, 0);
-
-    const elements = wizard.recorder.screenshotMetadata.elements || [];
-
-    // Count elements by type
-    const clickableElements = elements.filter(e => e.clickable === true);
-    const nonClickableElements = elements.filter(e => e.clickable === false || e.clickable === undefined);
-
-    console.log(`[FlowWizard] Drawing ${elements.length} elements (${clickableElements.length} clickable, ${nonClickableElements.length} non-clickable)`);
-    console.log('[FlowWizard] Overlay filters:', wizard.overlayFilters);
-
-    let visibleCount = 0;
-    let drawnCount = 0;
-    let filteredClickable = 0;
-    let filteredNonClickable = 0;
-    let drawnClickable = 0;
-    let drawnNonClickable = 0;
-
-    elements.forEach(el => {
-        // Only draw elements with bounds
-        if (!el.bounds) {
-            return;
-        }
-
-        visibleCount++;
-
-        // Apply filters (same as screenshot-capture.js)
-        if (el.clickable && !wizard.overlayFilters.showClickable) {
-            filteredClickable++;
-            return;
-        }
-        if (!el.clickable && !wizard.overlayFilters.showNonClickable) {
-            filteredNonClickable++;
-            return;
-        }
-
-        // Filter by size (hide small elements < 50px width or height)
-        if (wizard.overlayFilters.hideSmall && (el.bounds.width < 50 || el.bounds.height < 50)) {
-            if (el.clickable) filteredClickable++; else filteredNonClickable++;
-            return;
-        }
-
-        // Filter: text elements only
-        if (wizard.overlayFilters.textOnly && (!el.text || !el.text.trim())) {
-            if (el.clickable) filteredClickable++; else filteredNonClickable++;
-            return;
-        }
-
-        // Get coordinates (no scaling - 1:1)
-        const x = el.bounds.x;
-        const y = el.bounds.y;
-        const w = el.bounds.width;
-        const h = el.bounds.height;
-
-        // Skip elements outside canvas
-        if (x + w < 0 || x > wizard.canvas.width || y + h < 0 || y > wizard.canvas.height) {
-            return;
-        }
-
-        // Draw bounding box
-        // Green for clickable, blue for non-clickable (matching flow-wizard colors)
-        wizard.ctx.strokeStyle = el.clickable ? '#22c55e' : '#3b82f6';
-        wizard.ctx.fillStyle = el.clickable ? 'rgba(34, 197, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)';
-        wizard.ctx.lineWidth = 2;
-
-        // Fill background
-        wizard.ctx.fillRect(x, y, w, h);
-
-        // Draw border
-        wizard.ctx.strokeRect(x, y, w, h);
-        drawnCount++;
-        if (el.clickable) drawnClickable++; else drawnNonClickable++;
-
-        // Draw text label if element has text (and labels are enabled)
-        if (wizard.overlayFilters.showTextLabels && el.text && el.text.trim()) {
-            drawTextLabel(wizard, el.text, x, y, w, el.clickable);
-        }
-    });
-
-    console.log(`[FlowWizard] Total visible: ${visibleCount}`);
-    console.log(`[FlowWizard] Filtered: ${filteredClickable + filteredNonClickable} (${filteredClickable} clickable, ${filteredNonClickable} non-clickable)`);
-    console.log(`[FlowWizard] Drawn: ${drawnCount} (${drawnClickable} clickable, ${drawnNonClickable} non-clickable)`);
-}
-
-/**
- * Draw UI element overlays with scaling
- */
-export function drawElementOverlaysScaled(wizard, scale) {
-    if (!wizard.currentImage || !wizard.recorder.screenshotMetadata) {
-        console.warn('[FlowWizard] Cannot draw overlays: no screenshot loaded');
-        return;
-    }
-
-    const elements = wizard.recorder.screenshotMetadata.elements || [];
-
-    elements.forEach(el => {
-        if (!el.bounds) return;
-
-        // Apply overlay filters
-        if (el.clickable && !wizard.overlayFilters.showClickable) return;
-        if (!el.clickable && !wizard.overlayFilters.showNonClickable) return;
-        if (wizard.overlayFilters.hideSmall && (el.bounds.width < 50 || el.bounds.height < 50)) return;
-        if (wizard.overlayFilters.textOnly && (!el.text || !el.text.trim())) return;
-
-        // Scale coordinates
-        const x = Math.floor(el.bounds.x * scale);
-        const y = Math.floor(el.bounds.y * scale);
-        const w = Math.floor(el.bounds.width * scale);
-        const h = Math.floor(el.bounds.height * scale);
-
-        // Skip elements outside canvas
-        if (x + w < 0 || x > wizard.canvas.width || y + h < 0 || y > wizard.canvas.height) return;
-
-        // Draw bounding box
-        wizard.ctx.strokeStyle = el.clickable ? '#22c55e' : '#3b82f6';
-        wizard.ctx.lineWidth = 2;
-        wizard.ctx.strokeRect(x, y, w, h);
-
-        // Draw text label if element has text and showTextLabels is enabled
-        if (el.text && el.text.trim() && wizard.overlayFilters.showTextLabels) {
-            drawTextLabel(wizard, el.text.trim(), x, y, w, el.clickable);
-        }
-    });
-}
-
-/**
- * Draw text label for UI element on canvas
- * Scales font size based on canvas width to look appropriate at all resolutions
- */
-export function drawTextLabel(wizard, text, x, y, w, isClickable) {
-    // Scale font based on canvas width (reference: 720px = 12px font)
-    const scaleFactor = Math.max(0.6, Math.min(1.5, wizard.canvas.width / 720));
-    const fontSize = Math.round(12 * scaleFactor);
-    const labelHeight = Math.round(20 * scaleFactor);
-    const charWidth = Math.round(7 * scaleFactor);
-    const padding = Math.round(2 * scaleFactor);
-
-    // Truncate long text
-    const maxChars = Math.floor(w / charWidth); // Approximate chars that fit
-    const displayText = text.length > maxChars
-        ? text.substring(0, maxChars - 3) + '...'
-        : text;
-
-    // Draw background (matching element color)
-    wizard.ctx.fillStyle = isClickable ? '#22c55e' : '#3b82f6';
-    wizard.ctx.fillRect(x, y, w, labelHeight);
-
-    // Draw text
-    wizard.ctx.fillStyle = '#ffffff';
-    wizard.ctx.font = `${fontSize}px monospace`;
-    wizard.ctx.textBaseline = 'top';
-    wizard.ctx.fillText(displayText, x + padding, y + padding);
 }
 
 /**
