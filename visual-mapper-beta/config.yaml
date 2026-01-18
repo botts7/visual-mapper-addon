@@ -2,7 +2,7 @@
 # https://developers.home-assistant.io/docs/add-ons/configuration
 
 name: Visual Mapper Beta
-version: 0.4.0-beta.3.60
+version: 0.4.0-beta.3.62
 slug: visual_mapper_beta
 description: Android device control and sensor creation for Home Assistant via ADB
 url: https://github.com/botts7/visual-mapper
