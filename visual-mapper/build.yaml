@@ -1,0 +1,14 @@
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.19
+  amd64: ghcr.io/home-assistant/amd64-base:3.19
+  armhf: ghcr.io/home-assistant/armhf-base:3.19
+  armv7: ghcr.io/home-assistant/armv7-base:3.19
+  i386: ghcr.io/home-assistant/i386-base:3.19
+
+labels:
+  org.opencontainers.image.title: "Visual Mapper"
+  org.opencontainers.image.description: "Android device control and sensor creation for Home Assistant"
+  org.opencontainers.image.source: "https://github.com/botts7/visual-mapper-addon"
+  org.opencontainers.image.documentation: "https://github.com/botts7/visual-mapper"
+  org.opencontainers.image.licenses: "MIT"
+  org.opencontainers.image.vendor: "botts7"
