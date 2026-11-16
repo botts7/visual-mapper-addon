@@ -26,6 +26,7 @@ from .flow_models import (
 )
 from utils.element_finder import SmartElementFinder, ElementMatch
 from utils.device_security import DeviceSecurityManager, LockStrategy
+from utils.error_handler import classify_error, get_error_with_hint
 from .flow_execution_history import FlowExecutionHistory, FlowExecutionLog, FlowStepLog
 from core.navigation_manager import NavigationManager
 from ml_components.navigation_models import compute_screen_id, extract_ui_landmarks
@@ -127,6 +128,23 @@ class FlowExecutor:
         self._sensors_skipped_by_interval: Dict[str, float] = {}
 
         logger.info("[FlowExecutor] Initialized")
+
+    def _set_error_with_hint(
+        self, result: FlowExecutionResult, error_message: str
+    ) -> None:
+        """
+        Set error message on result with automatic hint classification.
+
+        Args:
+            result: The FlowExecutionResult to update
+            error_message: The error message
+        """
+        result.error_message = error_message
+        # Classify error and get hint
+        error_type = classify_error(error_message)
+        if error_type:
+            hint_info = get_error_with_hint(error_type, error_message)
+            result.error_hint = hint_info.get("hint", "")
 
     def _analyze_skippable_steps(self, flow: SensorCollectionFlow) -> set[int]:
         """
@@ -319,15 +337,47 @@ class FlowExecutor:
                     f"[FlowExecutor] Unlock attempt {attempt + 1}/{MAX_UNLOCK_ATTEMPTS} for {device_id}"
                 )
 
-            # Check if AUTO_UNLOCK is configured - if not, return helpful error on first attempt
+            # No AUTO_UNLOCK passcode. The device may only *look* locked because the
+            # screen is asleep (keyguard is reported while off; Samsung SCREEN_OFF
+            # counts as locked). Wake it, re-check, then try the swipe /
+            # dismiss-keyguard path before blaming a missing PIN. Always re-verify
+            # with is_locked(); the configured strategy is never proof of unlocked.
             if attempt == 0 and not has_auto_unlock:
-                # Device is locked but AUTO_UNLOCK not configured - tell user what to do
+                strategy = (security_config or {}).get("strategy")
+                manual_only = strategy == LockStrategy.MANUAL_ONLY.value
+                try:
+                    await self.adb_bridge.ensure_screen_on(device_id)
+                    await asyncio.sleep(0.5)  # keyguard settles after wake
+                    if not await self.adb_bridge.is_locked(device_id):
+                        logger.info(f"[FlowExecutor] Device {device_id} ready after wake")
+                        return {"success": True}
+                    if not manual_only:
+                        await self.adb_bridge.unlock_screen(device_id)
+                        await asyncio.sleep(0.5)
+                        if not await self.adb_bridge.is_locked(device_id):
+                            logger.info(
+                                f"[FlowExecutor] Device {device_id} unlocked via wake + swipe"
+                            )
+                            return {"success": True}
+                except Exception as e:
+                    logger.warning(f"[FlowExecutor] Wake/swipe for {device_id} failed: {e}")
+
+                if manual_only:
+                    logger.warning(
+                        f"[FlowExecutor] Device {device_id} is locked (strategy=manual_only)"
+                    )
+                    return {
+                        "success": False,
+                        "error": "Device is locked and its unlock strategy is Manual Only. Unlock it on the device, or change Device Settings > Security.",
+                        "reason": "manual_only"
+                    }
                 logger.warning(
-                    f"[FlowExecutor] Device {device_id} is locked but AUTO_UNLOCK not configured"
+                    f"[FlowExecutor] Device {device_id} still locked after wake + swipe, "
+                    f"AUTO_UNLOCK not configured (strategy={strategy})"
                 )
                 return {
                     "success": False,
-                    "error": "Device is locked but unlock is not configured. Go to Device Settings > Security and enable AUTO_UNLOCK with your PIN/passcode.",
+                    "error": "Device is still locked after waking and swiping, so it likely has a PIN, pattern or password. Go to Device Settings > Security and enable AUTO_UNLOCK with your passcode.",
                     "reason": "not_configured"
                 }
 
@@ -422,6 +472,7 @@ class FlowExecutor:
         strict_mode: bool = False,
         repair_mode: bool = False,
         force_execute: bool = False,
+        triggered_by: str = "scheduler",
     ) -> FlowExecutionResult:
         """
         Execute complete flow with configurable execution modes.
@@ -437,6 +488,7 @@ class FlowExecutor:
                         Fixes "Element moved Xpx" issues automatically.
             force_execute: If True, execute ALL steps regardless of sensor update intervals.
                           Useful for manual testing - bypasses "sensors not due" skip logic.
+            triggered_by: Source that triggered the execution (scheduler, manual, api, test).
 
         Returns:
             FlowExecutionResult with success/failure details
@@ -487,7 +539,7 @@ class FlowExecutor:
             flow_id=flow.flow_id,
             device_id=flow.device_id,
             started_at=datetime.now().isoformat(),
-            triggered_by="scheduler",  # TODO: Pass this as parameter when called from API/manual
+            triggered_by=triggered_by,
             total_steps=len(flow.steps),
             steps=[],
         )
@@ -529,8 +581,8 @@ class FlowExecutor:
                 )
                 if not wake_success:
                     if flow.verify_screen_on:
-                        result.error_message = (
-                            "Failed to wake screen for headless execution"
+                        self._set_error_with_hint(
+                            result, "Failed to wake screen for headless execution"
                         )
                         logger.error(f"  [Headless] {result.error_message}")
                         result.execution_time_ms = int(
@@ -647,7 +699,9 @@ class FlowExecutor:
                 # Timeout check
                 elapsed = time.time() - start_time
                 if elapsed > flow.flow_timeout:
-                    result.error_message = f"Flow timeout after {elapsed:.1f}s (limit: {flow.flow_timeout}s)"
+                    self._set_error_with_hint(
+                        result, f"Flow timeout after {elapsed:.1f}s (limit: {flow.flow_timeout}s)"
+                    )
                     result.failed_step = i
                     logger.warning(f"  {result.error_message}")
                     break
@@ -739,8 +793,8 @@ class FlowExecutor:
                         step_result.error_message = f"Step failed: {step.step_type}"
                         result.failed_step = i
                         if not result.error_message:
-                            result.error_message = (
-                                f"Step {i+1} failed: {step.step_type}"
+                            self._set_error_with_hint(
+                                result, f"Step {i+1} failed: {step.step_type}"
                             )
                         logger.warning(f"  Step {i+1} failed: {step.step_type}")
 
@@ -906,7 +960,7 @@ class FlowExecutor:
 
         except Exception as e:
             result.success = False
-            result.error_message = f"Flow execution error: {str(e)}"
+            self._set_error_with_hint(result, f"Flow execution error: {str(e)}")
             logger.error(
                 f"[FlowExecutor] Flow {flow.flow_id} error: {e}", exc_info=True
             )
@@ -2479,6 +2533,7 @@ class FlowExecutor:
             # Only process sensors that need updating (filtered by interval above)
             sensor_updates = []  # List of (sensor, value) tuples for batch publishing
             cached_count = 0
+            empty_count = 0  # Element found but extraction yielded nothing usable
             interval_skipped_count = len(step.sensor_ids) - len(sensors_to_capture)
             for sensor_id in sensors_to_capture:
                 # Check session cache first - avoid redundant captures
@@ -2548,6 +2603,20 @@ class FlowExecutor:
                             if sensor.extraction_rule
                             else None
                         )
+
+                    # Empty/missing extraction is a failed capture, not a value.
+                    # Keep last good current_value + last_updated, don't cache,
+                    # don't publish. "0" / 0 and a non-empty fallback_value
+                    # are real values and still pass.
+                    if value is None or (
+                        isinstance(value, str) and not value.strip()
+                    ):
+                        logger.warning(
+                            f"  Empty extraction for {sensor.friendly_name} "
+                            f"(raw text {raw_text!r}), keeping last value"
+                        )
+                        empty_count += 1
+                        continue
 
                     # Store in result and session cache
                     result.captured_sensors[sensor_id] = value
@@ -2640,6 +2709,11 @@ class FlowExecutor:
             if interval_skipped_count > 0:
                 logger.debug(
                     f"  Interval skip: {interval_skipped_count}/{total_sensors} skipped (not due for update)"
+                )
+            if empty_count > 0:
+                logger.warning(
+                    f"  Empty extraction: {empty_count}/{total_sensors} sensors "
+                    f"not updated (kept last value)"
                 )
             # Only fail if no sensors were captured AND none were skipped by interval
             # (interval-skipped sensors are intentional, not failures)
@@ -4005,7 +4079,7 @@ class FlowExecutor:
     # ============================================================================
 
     async def execute_flow_on_demand(
-        self, flow_id: str, device_id: str
+        self, flow_id: str, device_id: str, triggered_by: str = "manual"
     ) -> FlowExecutionResult:
         """
         Execute a flow on-demand (outside scheduler)
@@ -4013,6 +4087,7 @@ class FlowExecutor:
         Args:
             flow_id: Flow ID to execute
             device_id: Device ID
+            triggered_by: Source that triggered the execution (manual, api, test)
 
         Returns:
             FlowExecutionResult
@@ -4022,7 +4097,7 @@ class FlowExecutor:
             raise ValueError(f"Flow {flow_id} not found")
 
         # Execute without scheduler lock (caller must ensure no conflicts)
-        return await self.execute_flow(flow)
+        return await self.execute_flow(flow, triggered_by=triggered_by)
 
     def _get_sensor_name(self, device_id: str, sensor_id: str) -> str:
         """Get friendly name for a sensor ID"""
