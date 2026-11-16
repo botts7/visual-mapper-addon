@@ -50,6 +50,36 @@ mkdir -p "$DATA_DIR/sensors"
 mkdir -p "$DATA_DIR/ml"
 echo "Using data directory: $DATA_DIR (deleted on uninstall with 'delete data' option)"
 
+# Persist the ADB identity (adbkey + wireless pairing metadata) across
+# add-on updates and rebuilds. Both the native adb binary and adb_shell
+# use ~/.android, which otherwise lives in the replaceable container
+# layer, so every update generated a new key and phones had to re-pair.
+# /data is private to the add-on and survives updates (and is backed up).
+ADB_HOME_PERSIST="/data/.android"
+ADB_HOME_LINK="${HOME:-/root}/.android"
+mkdir -p "$ADB_HOME_PERSIST"
+chmod 700 "$ADB_HOME_PERSIST"
+ADB_HOME_OK=1
+if [ -d "$ADB_HOME_LINK" ] && [ ! -L "$ADB_HOME_LINK" ]; then
+    # Move any key already in this container across, never overwriting a
+    # saved one, and only remove the old folder if every copy worked.
+    for f in "$ADB_HOME_LINK"/* "$ADB_HOME_LINK"/.[!.]*; do
+        [ -e "$f" ] || continue
+        [ -e "$ADB_HOME_PERSIST/${f##*/}" ] && continue
+        cp -a "$f" "$ADB_HOME_PERSIST"/ || ADB_HOME_OK=0
+    done
+    if [ "$ADB_HOME_OK" = 1 ]; then
+        rm -rf "$ADB_HOME_LINK"
+    fi
+fi
+if [ "$ADB_HOME_OK" = 1 ]; then
+    ln -sfn "$ADB_HOME_PERSIST" "$ADB_HOME_LINK"
+    chmod 600 "$ADB_HOME_PERSIST"/adbkey 2>/dev/null || true
+    echo "ADB identity directory: $ADB_HOME_LINK -> $ADB_HOME_PERSIST"
+else
+    echo "WARNING: could not move $ADB_HOME_LINK to $ADB_HOME_PERSIST; ADB identity will not persist"
+fi
+
 # Use configurable port for beta (default 18085 to avoid conflict with stable on 8080)
 # main.py reads PORT environment variable
 export PORT=${SERVER_PORT:-18085}
