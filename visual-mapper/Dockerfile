@@ -1,5 +1,16 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+# Base image (replaces build.yaml, which Supervisor has deprecated).
+# Supervisor passes BUILD_ARCH; CI may still pass BUILD_FROM explicitly.
+ARG BUILD_ARCH=amd64
+ARG BUILD_FROM=ghcr.io/home-assistant/${BUILD_ARCH}-base:3.18
+FROM ${BUILD_FROM}
+
+LABEL \
+    org.opencontainers.image.title="Visual Mapper" \
+    org.opencontainers.image.description="Android device control and sensor creation for Home Assistant" \
+    org.opencontainers.image.source="https://github.com/botts7/visual-mapper-addon" \
+    org.opencontainers.image.documentation="https://github.com/botts7/visual-mapper" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.vendor="botts7"
 
 # Install system dependencies
 RUN apk add --no-cache \
