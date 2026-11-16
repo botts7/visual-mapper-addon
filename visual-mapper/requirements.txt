@@ -18,3 +18,5 @@ google-play-scraper>=1.2.4
 cryptography
 httpx==0.25.2
 numpy
+# mDNS lookup for wireless debugging port recovery (adb here has no mDNS backend)
+zeroconf>=0.146.0
