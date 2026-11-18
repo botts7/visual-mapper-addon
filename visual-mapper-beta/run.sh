@@ -11,8 +11,8 @@ echo "=========================================="
 
 # Read configuration from Home Assistant options
 if [ -f "$CONFIG_PATH" ]; then
-    echo "=== Config file contents ==="
-    cat $CONFIG_PATH
+    echo "=== Config options (values hidden) ==="
+    jq -r 'keys | join(", ")' $CONFIG_PATH
     echo ""
     echo "=============================="
     # Port is fixed at 18085 internally - users can map to different external port via HA Network settings
@@ -30,6 +30,17 @@ if [ -f "$CONFIG_PATH" ]; then
     export ML_USE_DQN=$(jq -r '.ml_use_dqn // false' $CONFIG_PATH)
     export ML_BATCH_SIZE=$(jq -r '.ml_batch_size // 64' $CONFIG_PATH)
     export ML_SAVE_INTERVAL=$(jq -r '.ml_save_interval // 60' $CONFIG_PATH)
+
+    # Remaining add-on options (previously never reached the backend).
+    # Booleans use an explicit null check: jq's // treats false as missing.
+    export MQTT_DISCOVERY_PREFIX=$(jq -r '.mqtt_discovery_prefix // "homeassistant"' $CONFIG_PATH)
+    export AUTO_START_UPDATES=$(jq -r 'if .auto_start_updates == null then true else .auto_start_updates end' $CONFIG_PATH)
+    export LABS_FLOW_CONSOLIDATION=$(jq -r 'if .labs_flow_consolidation == null then false else .labs_flow_consolidation end' $CONFIG_PATH)
+    export CONNECTION_CHECK_INTERVAL=$(jq -r '.connection_check_interval // 30' $CONFIG_PATH)
+    export CONNECTION_RETRY_ENABLED=$(jq -r 'if .connection_retry_enabled == null then true else .connection_retry_enabled end' $CONFIG_PATH)
+    export CONNECTION_MAX_RETRY_DELAY=$(jq -r '.connection_max_retry_delay // 300' $CONFIG_PATH)
+    export ADB_DEVICE_IP=$(jq -r '.adb_device_ip // ""' $CONFIG_PATH)
+    export ADB_DEVICE_PORT=$(jq -r '.adb_device_port // 5555' $CONFIG_PATH)
 
     echo "Loaded config from $CONFIG_PATH"
 else
